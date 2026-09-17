@@ -1,0 +1,10 @@
+# Never let Git touch line endings.
+#
+# This project's correctness rests on byte-identical file writes (the writer is verified to
+# reproduce unmodified sub-files byte-for-byte, and the test suite compares raw bytes). Files here
+# were authored with mixed LF and CRLF endings, so any EOL normalization would both rewrite content
+# on checkout and bury real changes in whitespace churn.
+#
+# "-text" disables all EOL conversion on every platform, for every file type. Content is stored and
+# restored exactly as it is on disk. Diffs still work normally.
+* -text
