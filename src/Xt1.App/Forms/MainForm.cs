@@ -45,6 +45,9 @@ public sealed class MainForm : Form
     /// <summary>Upper bound on slices assembled for one preview, before the texel budget is applied.</summary>
     private const int MaxPreviewSlices = 512;
 
+    /// <summary>Extensions the loader accepts, i.e. the file-browser roots shown in the tree.</summary>
+    private static readonly string[] OpenableExtensions = { ".dat", ".wta", ".wtb", ".xt1" };
+
     private BankDocument? _document;
     private BankSection? _section;
     private EditableTexture? _texture;
@@ -55,6 +58,32 @@ public sealed class MainForm : Form
     private bool _suppressTreeEvents;
 
     private readonly TreeView _tree = new() { Dock = DockStyle.Fill, HideSelection = false };
+
+    /// <summary>The file browser: openable files in the active document's folder, in columns.</summary>
+    private readonly ListView _fileList = new()
+    {
+        Dock = DockStyle.Fill,
+        View = View.Details,
+        FullRowSelect = true,
+        MultiSelect = false,
+        HideSelection = false,
+        ShowItemToolTips = true,
+        Sorting = SortOrder.None,
+    };
+
+    private readonly SplitContainer _browserSplit = new()
+    {
+        Dock = DockStyle.Fill,
+        Orientation = Orientation.Horizontal,
+        Panel1MinSize = 60,
+        Panel2MinSize = 120,
+    };
+
+    private string _fileSortColumn = "name";
+    private bool _fileSortAscending = true;
+    private bool _suppressFileSelection;
+    private Font? _activeFileFont;
+    private Font ActiveFileFont => _activeFileFont ??= new Font(_fileList.Font, FontStyle.Bold);
     private readonly Image2DViewer _imageViewer = new() { Dock = DockStyle.Fill };
     private readonly GlPreviewControl _glPreview = new() { Dock = DockStyle.Fill };
     private readonly TabControl _viewTabs = new() { Dock = DockStyle.Fill };
@@ -116,6 +145,7 @@ public sealed class MainForm : Form
         _initialFile = initialFile;
 
         Text = "XT1 Studio";
+        Icon = AppIcon.Shared;
         ClientSize = new Size(1400, 900);
         StartPosition = FormStartPosition.CenterScreen;
         KeyPreview = true;
@@ -427,7 +457,20 @@ public sealed class MainForm : Form
         _tree.NodeMouseDoubleClick += (_, e) => e.Node.Expand();
         _tree.AfterSelect += (_, _) => OnTreeSelectionChanged();
         BuildTreeMenu();
-        outer.Panel1.Controls.Add(_tree);
+
+        // The left pane is a file browser (sortable, resizeable columns) over the openable files in
+        // the folder, with the selected file's bank/texture tree underneath it.
+        _fileList.Columns.Add("Name", 240, HorizontalAlignment.Left);
+        _fileList.Columns.Add("Modified", 140, HorizontalAlignment.Left);
+        _fileList.Columns.Add("Size", 90, HorizontalAlignment.Right);
+        _fileList.ColumnClick += OnFileColumnClick;
+        _fileList.SelectedIndexChanged += (_, _) => OnFileSelectionChanged();
+        EnableDoubleBuffering(_fileList);
+        EnableDoubleBuffering(_tree);
+
+        _browserSplit.Panel1.Controls.Add(_fileList);
+        _browserSplit.Panel2.Controls.Add(_tree);
+        outer.Panel1.Controls.Add(_browserSplit);
 
         var inner = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Vertical };
         _innerSplit = inner;
@@ -501,7 +544,7 @@ public sealed class MainForm : Form
         return Directory.Exists(romfs) ? romfs : Environment.CurrentDirectory;
     }
 
-    private void LoadFile(string path)
+    private bool LoadFile(string path)
     {
         try
         {
@@ -513,15 +556,216 @@ public sealed class MainForm : Form
             SetStatus(_document!.Warnings.Count == 0
                 ? $"Loaded {_document.DisplayName}"
                 : $"Loaded {_document.DisplayName} - {string.Join("; ", _document.Warnings)}");
+            return true;
         }
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.Message, "Failed to open", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return false;
         }
         finally
         {
             Cursor = Cursors.Default;
         }
+    }
+
+    /// <summary>
+    /// Openable files sitting in the active document's folder (the file-browser roots). The active
+    /// file is always included even when its extension is unexpected, and parsing is deferred until
+    /// the user picks one, so a folder of large banks does not all load at once.
+    /// </summary>
+    private IReadOnlyList<string> SiblingFiles()
+    {
+        var active = _document?.FilePath;
+        if (string.IsNullOrEmpty(active)) return Array.Empty<string>();
+
+        var folder = Path.GetDirectoryName(active);
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+            return new[] { active };
+
+        var files = new List<string>();
+        try
+        {
+            foreach (var path in Directory.EnumerateFiles(folder))
+            {
+                var extension = Path.GetExtension(path);
+                if (OpenableExtensions.Any(e => string.Equals(e, extension, StringComparison.OrdinalIgnoreCase)))
+                    files.Add(path);
+            }
+        }
+        catch
+        {
+            return new[] { active };
+        }
+
+        if (!files.Any(p => SamePath(p, active))) files.Add(active);
+        files.Sort(StringComparer.OrdinalIgnoreCase);
+        return files;
+    }
+
+    private static bool SamePath(string a, string b) =>
+        string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Fill or update the file browser. Switching between files in the same folder leaves the row set
+    /// identical, so that path only moves the selection/bold marker instead of clearing and re-adding
+    /// every row (which flashed and re-entered the selection handler).
+    /// </summary>
+    private void RefreshFileList()
+    {
+        var active = _document?.FilePath;
+        var entries = SiblingFiles().Select(FileEntry.Read).ToList();
+        entries.Sort(CompareFileEntries);
+        var paths = entries.Select(e => e.Path).ToList();
+        var current = _fileList.Items.Cast<ListViewItem>()
+            .Select(item => item.Tag as string ?? string.Empty).ToList();
+
+        if (current.Count == paths.Count && current.SequenceEqual(paths, StringComparer.OrdinalIgnoreCase))
+        {
+            UpdateFileActiveRow(active);
+            UpdateFileColumnHeaders();
+            return;
+        }
+
+        _suppressFileSelection = true;
+        _fileList.BeginUpdate();
+        try
+        {
+            _fileList.Items.Clear();
+            foreach (var entry in entries)
+            {
+                var item = new ListViewItem(entry.Name) { Tag = entry.Path, ToolTipText = entry.Path };
+                item.SubItems.Add(entry.ModifiedDisplay);
+                item.SubItems.Add(entry.SizeDisplay);
+                _fileList.Items.Add(item);
+            }
+        }
+        finally
+        {
+            _fileList.EndUpdate();
+            _suppressFileSelection = false;
+        }
+
+        UpdateFileActiveRow(active);
+        UpdateFileColumnHeaders();
+    }
+
+    /// <summary>Bold and select the active file's row without touching the other rows.</summary>
+    private void UpdateFileActiveRow(string? active)
+    {
+        _suppressFileSelection = true;
+        try
+        {
+            foreach (ListViewItem item in _fileList.Items)
+            {
+                bool isActive = active is not null && item.Tag is string path && SamePath(path, active);
+                item.Font = isActive ? ActiveFileFont : _fileList.Font;
+                if (!isActive) continue;
+                item.Selected = true;
+                item.EnsureVisible();
+            }
+        }
+        finally
+        {
+            _suppressFileSelection = false;
+        }
+    }
+
+    private int CompareFileEntries(FileEntry a, FileEntry b)
+    {
+        int result = _fileSortColumn switch
+        {
+            "modified" => a.ModifiedUtc.CompareTo(b.ModifiedUtc),
+            "size" => a.Size.CompareTo(b.Size),
+            _ => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase),
+        };
+        if (result == 0) result = string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+        return _fileSortAscending ? result : -result;
+    }
+
+    private void OnFileSelectionChanged()
+    {
+        if (_suppressFileSelection || _fileList.SelectedItems.Count == 0) return;
+        if (_fileList.SelectedItems[0].Tag is not string path) return;
+        if (_document?.FilePath is not null && SamePath(path, _document.FilePath)) return;
+
+        // Deferred so the load/rebuild never runs inside the ListView's own selection change.
+        void Open()
+        {
+            if (!LoadFile(path)) RefreshFileList(); // a failed load keeps the previous selection
+        }
+        if (IsHandleCreated) BeginInvoke(Open);
+        else Open();
+    }
+
+    private void OnFileColumnClick(object? sender, ColumnClickEventArgs e)
+    {
+        var column = e.Column switch { 1 => "modified", 2 => "size", _ => "name" };
+        if (string.Equals(_fileSortColumn, column, StringComparison.Ordinal))
+        {
+            _fileSortAscending = !_fileSortAscending;
+        }
+        else
+        {
+            _fileSortColumn = column;
+            _fileSortAscending = true;
+        }
+        RefreshFileList();
+    }
+
+    private void UpdateFileColumnHeaders()
+    {
+        var indicator = _fileSortAscending ? " ^" : " v";
+        _fileList.Columns[0].Text = _fileSortColumn == "name" ? "Name" + indicator : "Name";
+        _fileList.Columns[1].Text = _fileSortColumn == "modified" ? "Modified" + indicator : "Modified";
+        _fileList.Columns[2].Text = _fileSortColumn == "size" ? "Size" + indicator : "Size";
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        double value = bytes / 1024.0;
+        if (value < 1024) return $"{value:0.#} KB";
+        value /= 1024.0;
+        if (value < 1024) return $"{value:0.#} MB";
+        return $"{value / 1024.0:0.##} GB";
+    }
+
+    /// <summary>
+    /// WinForms TreeView/ListView flicker on Clear() + rebuild; enabling their protected double
+    /// buffer is the standard fix and not reachable through the public API.
+    /// </summary>
+    private static void EnableDoubleBuffering(Control control)
+    {
+        typeof(Control)
+            .GetProperty("DoubleBuffered", System.Reflection.BindingFlags.Instance |
+                                            System.Reflection.BindingFlags.NonPublic)
+            ?.SetValue(control, true, null);
+    }
+
+    /// <summary>One row of the file browser.</summary>
+    private readonly record struct FileEntry(string Path, string Name, DateTime ModifiedUtc, long Size)
+    {
+        public static FileEntry Read(string path)
+        {
+            var name = System.IO.Path.GetFileName(path);
+            try
+            {
+                var info = new FileInfo(path);
+                if (info.Exists) return new FileEntry(path, name, info.LastWriteTimeUtc, info.Length);
+            }
+            catch
+            {
+                // Unreadable metadata: fall through to an "unknown" row so the file is still listed.
+            }
+            return new FileEntry(path, name, DateTime.MinValue, -1);
+        }
+
+        public string ModifiedDisplay => ModifiedUtc == DateTime.MinValue
+            ? "--"
+            : ModifiedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+
+        public string SizeDisplay => Size < 0 ? "--" : MainForm.FormatSize(Size);
     }
 
     /// <summary>Make a freshly loaded or created document the active one and rebuild the UI around it.</summary>
@@ -582,11 +826,13 @@ public sealed class MainForm : Form
             var root = new TreeNode(outline.Label) { Tag = _document };
             AddOutlineChildren(root, outline);
             _tree.Nodes.Add(root);
-            _tree.ExpandAll();
+            root.ExpandAll();
         }
 
         _tree.EndUpdate();
         _suppressTreeEvents = false;
+
+        RefreshFileList();
     }
 
     private void AddOutlineChildren(TreeNode parent, BankOutlineNode node)
@@ -1757,6 +2003,7 @@ public sealed class MainForm : Form
         // the control bounds and throw.
         TrySetSplitter(_outerSplit, 260);
         TrySetSplitter(_innerSplit, Math.Max(200, _innerSplit.Width - 440));
+        TrySetSplitter(_browserSplit, 200);
 
         if (_initialFile is not null)
         {
@@ -1855,6 +2102,34 @@ public sealed class MainForm : Form
             items.Add($"{menuItem.Text}|{(menuItem.Enabled ? "enabled" : "disabled")}");
         }
         return items;
+    }
+
+    /// <summary>Test hook: the file browser's rows, in display order (Name column).</summary>
+    internal IReadOnlyList<string> UiTestFileListItems() =>
+        _fileList.Items.Cast<ListViewItem>().Select(item => item.Text ?? string.Empty).ToList();
+
+    /// <summary>Test hook: the file browser's column headers.</summary>
+    internal IReadOnlyList<string> UiTestFileColumnHeaders() =>
+        _fileList.Columns.Cast<ColumnHeader>().Select(column => column.Text ?? string.Empty).ToList();
+
+    /// <summary>Test hook: click a column header (0=Name, 1=Modified, 2=Size) and return the new order.</summary>
+    internal IReadOnlyList<string> UiTestSortFileColumn(int column)
+    {
+        OnFileColumnClick(this, new ColumnClickEventArgs(column));
+        return UiTestFileListItems();
+    }
+
+    /// <summary>Test hook: pick a file row by name fragment, the way a click does.</summary>
+    internal string UiTestPickFile(string nameFragment)
+    {
+        foreach (ListViewItem item in _fileList.Items)
+        {
+            if (item.Text?.Contains(nameFragment, StringComparison.OrdinalIgnoreCase) != true) continue;
+            item.Selected = true;
+            item.EnsureVisible();
+            return item.Text;
+        }
+        return "not found";
     }
 
     /// <summary>Test hook used by <c>--uitest</c>: select a node the way a right-click does.</summary>

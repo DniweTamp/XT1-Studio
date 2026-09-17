@@ -118,13 +118,20 @@ src/Xt1.App    net8.0-windows: WinForms shell, GDI+ 2D viewer, OpenGL cubemap/vo
 tests/Xt1.Core.Tests  441 tests, real-file validation against D:\Bayonetta3\romfs when present
 ```
 
-`Xt1.Core` is headless and fully testable; the app only consumes it.
+`Xt1.Core` is headless and fully testable; the app only consumes it. The window and executable icon is
+`src/Xt1.App/Xt1Studio.ico`, embedded both as the Win32 `ApplicationIcon` and as an assembly resource
+(`AppIcon.Shared`) so forms and the published single-file exe show it without a loose file.
 
 ## Features
 
 - Open `.wta`, `.dat`, `.dtt`, `.wtb`, `.xt1`; a `.dat` pairs automatically with its `.dtt`
-  (and vice versa), and a split `.wta` automatically pairs with its sibling `.wtp`.- Collapsible container tree. Banks reach it under two tags: `"wta"` (whose payload is paired from
-  the `"wtp"` sub-files) and `"wtb"` (a standalone bank carrying its payload inline). A container
+  (and vice versa), and a split `.wta` automatically pairs with its sibling `.wtp`.
+- File browser over the container tree: a column list (Name / Modified / Size, click a header to sort,
+  columns are drag-resizeable) of every openable file (`.dat`, `.wta`, `.wtb`, `.xt1`) in the active
+  document's folder, with the selected file's bank/texture tree below it. Picking a row loads that
+  file; parsing is deferred, so a folder of hundreds of large banks does not all load at once and
+  switching files does not rebuild the file list. Banks reach the tree under two tags: `"wta"` (whose payload is paired from the
+  `"wtp"` sub-files) and `"wtb"` (a standalone bank carrying its payload inline). A container
   with several banks gets one branch per bank, labeled with the DAT's own sub-file name. There is no
   separate bank selector: every bank is already a branch of the same tree. Single-bank containers keep
   a short `wta`/`wtb` label. Texture leaves show the `table3` hash after the index when the bank has one:

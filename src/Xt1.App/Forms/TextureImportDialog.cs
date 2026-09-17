@@ -54,6 +54,7 @@ public sealed class TextureImportDialog : Form
         bool makeOpaque = false)
     {
         Text = "Import texture";
+        Icon = AppIcon.Shared;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;

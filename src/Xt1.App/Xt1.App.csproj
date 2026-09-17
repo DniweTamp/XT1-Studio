@@ -12,10 +12,16 @@
     <RootNamespace>Xt1.App</RootNamespace>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- Executable/taskbar icon; also embedded as a resource so forms can load it at runtime. -->
+    <ApplicationIcon>Xt1Studio.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="OpenTK.GLControl" Version="4.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Xt1Studio.ico" />
   </ItemGroup>
 
   <ItemGroup>

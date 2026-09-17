@@ -108,6 +108,12 @@ internal static class UiSmoke
             var inspectorForm = new Forms.MainForm(target);
             inspectorForm.Show();
             Pump(log, ref watch, "inspector MainForm shown", 40);
+
+            // The window icon must come from the embedded resource, not the fallback system icon.
+            Expect(log, AppIcon.Shared.Handle != SystemIcons.Application.Handle,
+                "the app icon loads from the embedded resource",
+                $"icon {AppIcon.Shared.Width}x{AppIcon.Shared.Height}");
+
             inspectorForm.UiTestSelectTexture(0, 1);
             Pump(log, ref watch, "selected texture #1", 30);
 
@@ -155,6 +161,44 @@ internal static class UiSmoke
             var bankMenu = inspectorForm.UiTestTreeMenuItems();
             Expect(log, bankMenu.Contains("Export every texture in this bank (PNG folder)...|enabled"),
                 "the bank menu offers the bank export", "Export every texture in this bank (PNG folder)...");
+
+            // The file browser lists every openable file in the folder, in sortable columns.
+            var files = inspectorForm.UiTestFileListItems();
+            Expect(log, files.Count > 1, "the file browser lists the folder's openable files",
+                $"{files.Count} files, first: {files.FirstOrDefault()}");
+            Expect(log, files.Any(f => f.Contains("em0000.dat", StringComparison.OrdinalIgnoreCase)),
+                "the active file is in the list", string.Join(", ", files.Take(3)));
+            Expect(log, files.All(f => !f.Contains(".dtt", StringComparison.OrdinalIgnoreCase)),
+                "payload-only files are not listed", string.Join(", ", files.Take(3)));
+
+            var headers = inspectorForm.UiTestFileColumnHeaders();
+            Expect(log, headers.Count == 3
+                        && headers.Any(h => h.StartsWith("Modified", StringComparison.Ordinal))
+                        && headers.Any(h => h.StartsWith("Size", StringComparison.Ordinal)),
+                "the browser has Modified and Size columns", string.Join(" | ", headers));
+
+            // Clicking a header sorts by it; clicking again reverses, and the indicator follows.
+            var byModified = inspectorForm.UiTestSortFileColumn(1);
+            var modifiedHeaders = inspectorForm.UiTestFileColumnHeaders();
+            Expect(log, modifiedHeaders.Any(h => h == "Modified ^"),
+                "clicking Modified sorts by it ascending", string.Join(" | ", modifiedHeaders));
+            var byModifiedDesc = inspectorForm.UiTestSortFileColumn(1);
+            var descHeaders = inspectorForm.UiTestFileColumnHeaders();
+            Expect(log, descHeaders.Any(h => h == "Modified v")
+                        && byModifiedDesc.FirstOrDefault() != byModified.FirstOrDefault(),
+                "clicking again reverses the sort", string.Join(" | ", descHeaders));
+            Expect(log, inspectorForm.UiTestSortFileColumn(0).Count == files.Count,
+                "sorting by Name keeps every row", "Name");
+
+            // Picking a file row loads it and shows its banks (em0416.dat is a small valid bank in
+            // the same folder).
+            inspectorForm.UiTestPickFile("em0416.dat");
+            Pump(log, ref watch, "picked a file row", 30);
+            Expect(log, inspectorForm.UiTestStatus.Contains("Loaded em0416.dat"),
+                "picking a file loads it", inspectorForm.UiTestStatus);
+            var siblingSection = inspectorForm.UiTestSelectNode("textures)");
+            Expect(log, siblingSection.Contains("textures"),
+                "the loaded file shows its banks", siblingSection);
 
             // A brand-new empty bank must still offer "Add texture" (it has no texture to select,
             // which used to leave the whole menu greyed out).

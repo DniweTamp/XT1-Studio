@@ -61,6 +61,7 @@ public sealed class SettingsDialog : Form
         Result = settings;
 
         Text = "Settings";
+        Icon = AppIcon.Shared;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;

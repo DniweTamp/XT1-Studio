@@ -22,6 +22,7 @@ public sealed class NewBankDialog : Form
     public NewBankDialog()
     {
         Text = "New empty bank";
+        Icon = AppIcon.Shared;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;

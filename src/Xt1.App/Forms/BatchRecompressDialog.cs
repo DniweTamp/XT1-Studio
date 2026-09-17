@@ -38,6 +38,7 @@ public sealed class BatchRecompressDialog : Form
         EncoderBackend backend, bool hasDocument)
     {
         Text = "Batch recompress (ASTC to BC)";
+        Icon = AppIcon.Shared;
         StartPosition = FormStartPosition.CenterParent;
         MinimumSize = new Size(720, 560);
         ClientSize = new Size(760, 600);
