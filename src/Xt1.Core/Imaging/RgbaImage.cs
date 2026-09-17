@@ -44,16 +44,7 @@ public sealed class RgbaImage
 
     public int SliceStride => Width * Height * 4;
 
-    public long ByteCount => (long)Width * Height * Depth * 4;
-
     public Span<byte> Slice(int z) => Pixels.AsSpan(z * SliceStride, SliceStride);
-
-    public RgbaImage GetSlice(int z)
-    {
-        var slice = new RgbaImage(Width, Height) { IsSrgb = IsSrgb };
-        Slice(z).CopyTo(slice.Pixels);
-        return slice;
-    }
 
     public void SetSlice(int z, RgbaImage slice)
     {
@@ -127,30 +118,6 @@ public sealed class RgbaImage
             if (Pixels[i] != 255)
                 return true;
         return false;
-    }
-
-    /// <summary>Extract a single channel as an 8-bit grayscale image (copy).</summary>
-    public RgbaImage ExtractChannel(int channel)
-    {
-        var result = new RgbaImage(Width, Height, Depth) { IsSrgb = false };
-        for (int i = 0; i < Pixels.Length; i += 4)
-        {
-            byte v = Pixels[i + channel];
-            result.Pixels[i] = v;
-            result.Pixels[i + 1] = v;
-            result.Pixels[i + 2] = v;
-            result.Pixels[i + 3] = 255;
-        }
-        return result;
-    }
-
-    /// <summary>Return a copy with alpha forced opaque (for viewing formats with meaningless alpha).</summary>
-    public RgbaImage WithOpaqueAlpha()
-    {
-        var copy = Clone();
-        for (int i = 3; i < copy.Pixels.Length; i += 4)
-            copy.Pixels[i] = 255;
-        return copy;
     }
 
     /// <summary>

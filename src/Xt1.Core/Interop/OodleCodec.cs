@@ -29,14 +29,10 @@ public sealed class OodleCodec : IDisposable
     private delegate long CompressedBufferSizeNeededFn(int compressor, long rawSize);
 
     // OodleLZ_Compressor
-    public const int CompressorNone = 0;
     public const int CompressorKraken = 4;
 
     // OodleLZ_CompressionLevel
-    public const int LevelNone = 0;
-    public const int LevelFast = 3;
     public const int LevelNormal = 4;
-    public const int LevelOptimal2 = 6;
 
     private readonly IntPtr _handle;
     private readonly OodleDecompressFn? _decompress;
@@ -45,9 +41,6 @@ public sealed class OodleCodec : IDisposable
     private readonly CompressedBufferSizeNeededFn? _bufferSizeNeeded;
 
     public string LibraryPath { get; }
-
-    /// <summary>True when the export exists (it may still be a decompress-only build).</summary>
-    public bool CanCompress => _compress is not null;
 
     private int _compressionProbe = -1;
 

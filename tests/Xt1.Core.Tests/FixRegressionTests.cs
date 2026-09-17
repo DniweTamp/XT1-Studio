@@ -248,6 +248,7 @@ public class FixRegressionTests
             Assert.Equal(new byte[] { 1, 2, 3, 4 }, File.ReadAllBytes(first));
             Assert.Equal(new byte[] { 5, 6, 7, 8 }, File.ReadAllBytes(second));
             Assert.Empty(Directory.GetFiles(directory, "*.xt1-staging-*"));
+            Assert.Empty(Directory.GetFiles(directory, "*.xt1-backup-*"));
         }
         finally
         {
@@ -285,6 +286,114 @@ public class FixRegressionTests
         {
             TryDeleteDirectory(directory);
         }
+    }
+
+    /// <summary>
+    /// A failure while *swapping* must undo the files that were already replaced. The staging-failure
+    /// test above cannot catch this: there the swap never starts. Here the first move succeeds and the
+    /// second fails, so without a rollback the bank is left with one side updated and its partner stale.
+    /// </summary>
+    [Fact]
+    public void WriteResult_SaveAll_SwapFailureRestoresAlreadyReplacedFiles()
+    {
+        var directory = NewTempDirectory();
+        try
+        {
+            var first = Path.Combine(directory, "a.dat");
+            File.WriteAllBytes(first, new byte[] { 1, 2, 3 });
+
+            // A directory at the second destination makes the second move fail, after the first
+            // destination has already been replaced.
+            var blocked = Path.Combine(directory, "a.dtt");
+            Directory.CreateDirectory(blocked);
+
+            var result = new WriteResult(new[]
+            {
+                new OutputFile(first, new byte[] { 9, 9, 9 }),
+                new OutputFile(blocked, new byte[] { 8 }),
+            }, Array.Empty<string>());
+
+            Assert.ThrowsAny<Exception>(() => result.SaveAll());
+
+            Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(first));
+            Assert.Empty(Directory.GetFiles(directory, "*.xt1-staging-*"));
+            Assert.Empty(Directory.GetFiles(directory, "*.xt1-backup-*"));
+        }
+        finally
+        {
+            TryDeleteDirectory(directory);
+        }
+    }
+
+    /// <summary>
+    /// Untrusted dimensions must be refused, not allocated. A crafted 18-byte TGA used to size its
+    /// buffers straight from the 16-bit header fields.
+    /// </summary>
+    [Fact]
+    public void TgaIo_RejectsImplausibleDimensions()
+    {
+        var data = new byte[18];
+        data[2] = 2;            // uncompressed truecolor
+        data[12] = 0xFF;        // width = 65535
+        data[13] = 0xFF;
+        data[14] = 0xFF;        // height = 8191
+        data[15] = 0x1F;
+        data[16] = 32;          // 32bpp
+
+        Assert.Throws<InvalidDataException>(() => TgaIo.Read(data));
+    }
+
+    /// <summary>
+    /// A header can advertise dimensions whose derived block counts would allocate gigabytes and spin
+    /// the swizzle loops; such geometry must produce no layout so the decoders refuse it.
+    /// </summary>
+    [Fact]
+    public void SurfaceLayout_RejectsImplausibleDimensions()
+    {
+        var header = new Xt1Header
+        {
+            Width = 32767,
+            Height = 8192,
+            Depth = 1,
+            MipCount = 1,
+            Type = TextureType.T2D,
+            Layout = 1,
+            FormatValue = (uint)Xt1Format.Rgba8Unorm,
+        };
+
+        var layout = SurfaceLayout.Compute(header);
+
+        Assert.False(layout.Applicable);
+        Assert.Contains("implausible", layout.Note);
+    }
+
+    /// <summary>
+    /// The managed path must not claim signed BC4/BC5: BCnEncoder's Bc4/Bc5 are unsigned, so claiming
+    /// them decoded signed data as unsigned and re-encoded it as unsigned under a SNORM header. They
+    /// route to NVTT, which has BC4_SIGNED/BC5_SIGNED.
+    /// </summary>
+    [Fact]
+    public void ManagedPath_DoesNotClaimSignedBc4OrBc5()
+    {
+        var bc4Snorm = FormatTable.Get(Xt1Format.Bc4Snorm)!;
+        var bc5Snorm = FormatTable.Get(Xt1Format.Bc5Snorm)!;
+        var bc4Unorm = FormatTable.Get(Xt1Format.Bc4Unorm)!;
+        var bc5Unorm = FormatTable.Get(Xt1Format.Bc5Unorm)!;
+
+        Assert.False(ManagedFormatMap.SupportsDecode(bc4Snorm));
+        Assert.False(ManagedFormatMap.SupportsEncode(bc4Snorm));
+        Assert.False(ManagedFormatMap.SupportsDecode(bc5Snorm));
+        Assert.False(ManagedFormatMap.SupportsEncode(bc5Snorm));
+
+        // The unsigned variants stay in the managed path.
+        Assert.True(ManagedFormatMap.SupportsDecode(bc4Unorm));
+        Assert.True(ManagedFormatMap.SupportsEncode(bc4Unorm));
+        Assert.True(ManagedFormatMap.SupportsDecode(bc5Unorm));
+        Assert.True(ManagedFormatMap.SupportsEncode(bc5Unorm));
+
+        // ... and NVTT still covers the signed ones, so nothing became unencodable.
+        Assert.True(NvttFormatMap.InProcessSupports(Xt1Format.Bc4Snorm));
+        Assert.True(NvttFormatMap.InProcessSupports(Xt1Format.Bc5Snorm));
     }
 
     /// <summary>The layout cache must reflect header edits (imageSize drives SizeMatches).</summary>

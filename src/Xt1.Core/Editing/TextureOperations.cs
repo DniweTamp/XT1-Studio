@@ -21,12 +21,17 @@ public sealed record OperationResult(bool Success, string? Error, string? Warnin
 /// </summary>
 public static class TextureOperations
 {
-    /// <summary>Replace a 2D texture's pixels, re-encoding to its current format.</summary>
+    /// <summary>
+    /// Replace a 2D texture's pixels, re-encoding to its current format.
+    /// <paramref name="originalHeader"/> lets the caller supply the header as it was *before* it
+    /// changed the format for this encode; without it the undo snapshot would record the new format
+    /// alongside the old payload, and undoing would leave a header that lies about its payload.
+    /// </summary>
     public static OperationResult Replace2D(EditableTexture texture, RgbaImage image,
-        ITextureEncoder encoder, bool generateMips, EncodeQuality quality)
+        ITextureEncoder encoder, bool generateMips, EncodeQuality quality, byte[]? originalHeader = null)
     {
         var beforePayload = texture.Payload;
-        var beforeHeader = texture.Header.Raw.ToArray();
+        var beforeHeader = originalHeader ?? texture.Header.Raw.ToArray();
         var beforeSize = texture.PayloadSize;
         var beforeOffset = texture.PayloadOffset;
         var beforeImageSize = texture.Header.ImageSize;
@@ -73,12 +78,12 @@ public static class TextureOperations
         return OperationResult.Ok();
     }
 
-    /// <summary>Replace a cubemap from six faces.</summary>
+    /// <summary>Replace a cubemap from six faces. See <see cref="Replace2D"/> for <paramref name="originalHeader"/>.</summary>
     public static OperationResult ReplaceCube(EditableTexture texture, IReadOnlyList<RgbaImage> faces,
-        ITextureEncoder encoder, bool generateMips, EncodeQuality quality)
+        ITextureEncoder encoder, bool generateMips, EncodeQuality quality, byte[]? originalHeader = null)
     {
         var beforePayload = texture.Payload;
-        var beforeHeader = texture.Header.Raw.ToArray();
+        var beforeHeader = originalHeader ?? texture.Header.Raw.ToArray();
         var beforeSize = texture.PayloadSize;
         var beforeImageSize = texture.Header.ImageSize;
 
@@ -166,15 +171,6 @@ public static class TextureOperations
         return new DelegateCommand(name,
             () => Mem.WriteU32LE(texture.Header.Raw, offset, value),
             () => Mem.WriteU32LE(texture.Header.Raw, offset, before));
-    }
-
-    /// <summary>Set an arbitrary byte range (used by the raw hex editor).</summary>
-    public static IEditCommand CreateBytesCommand(byte[] target, int offset, byte[] newBytes, string name)
-    {
-        var before = target.AsSpan(offset, newBytes.Length).ToArray();
-        return new DelegateCommand(name,
-            () => newBytes.CopyTo(target, offset),
-            () => before.CopyTo(target, offset));
     }
 
     /// <summary>Batch force of a table2 byte across every texture in a bank.</summary>

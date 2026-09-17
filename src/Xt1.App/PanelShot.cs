@@ -18,8 +18,8 @@ internal static class PanelShot
             return 2;
         }
 
-        int? index = GetIntOption(args, "--index");
-        int? height = GetIntOption(args, "--height");
+        int? index = CliOptions.GetInt(args, "--index");
+        int? height = CliOptions.GetInt(args, "--height");
         bool advanced = args.Contains("--advanced");
         bool tree = args.Contains("--tree");
 
@@ -95,10 +95,4 @@ internal static class PanelShot
         }
     }
 
-    private static int? GetIntOption(string[] args, string name)
-    {
-        int at = Array.IndexOf(args, name);
-        if (at < 0 || at + 1 >= args.Length) return null;
-        return int.TryParse(args[at + 1], out int parsed) ? parsed : null;
-    }
 }

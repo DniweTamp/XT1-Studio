@@ -57,7 +57,10 @@ public static class TextureEncoder
         var layout = ComputeLayout(texture.Header, width, height, 1, mipCount, TextureType.TCubeArray);
         if (layout is null) return EncodeResult.Fail("cannot compute payload layout for cube faces");
 
-        long faceStride = layout.FaceStride > 0 ? layout.FaceStride : Mem.Align(layout.FaceSize, 4096);
+        // Reuse the validated face stride from SurfaceLayout rather than recomputing a 4096-byte
+        // alignment: a face chain whose base mip is under one page is stored densely (see
+        // SurfaceLayout), and re-encoding must reproduce the same payload size the game expects.
+        long faceStride = layout.FaceStride > 0 ? layout.FaceStride : layout.FaceSize;
         long total = faceStride * 6;
         if (total > int.MaxValue) return EncodeResult.Fail("cubemap payload is too large");
 
@@ -149,6 +152,10 @@ public static class TextureEncoder
         header.ImageSize = (ulong)payload.Length;
         header.Type = cube ? TextureType.TCubeArray : header.Type;
         header.HeaderSize = Xt1Header.Size;
+
+        // The 0x14 high word must agree with the format: "af" (0x6661) for format 0x01 and zero for
+        // everything else, or the record fails its own validation (XT1_FORMAT.md sections 5 and 13).
+        header.CodecTag = header.FormatValue == (uint)Xt1Format.AfL8Unorm ? Xt1Header.AfCodecTag : (ushort)0;
 
         texture.Payload = payload;
         texture.PayloadSize = (uint)payload.Length;

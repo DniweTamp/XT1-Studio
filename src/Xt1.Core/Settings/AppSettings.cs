@@ -32,8 +32,6 @@ public sealed class AppSettings
     public string? NvttDllPath { get; set; }
     public string? NvttCliPath { get; set; }
     public string? OodlePath { get; set; }
-    public string? AstcencPath { get; set; }
-    public string? TexconvPath { get; set; }
 
     public string? LastDirectory { get; set; }
 
@@ -67,12 +65,19 @@ public sealed class AppSettings
         return new AppSettings();
     }
 
+    /// <summary>
+    /// Persist to disk. Written to a temporary file and moved into place so an interrupted or
+    /// concurrent save cannot leave a truncated settings.json, which would silently reset every
+    /// configured path and default on the next launch.
+    /// </summary>
     public void Save()
     {
         try
         {
             Directory.CreateDirectory(SettingsDirectory);
-            File.WriteAllText(SettingsPath, JsonSerializer.Serialize(this, Options));
+            var temp = SettingsPath + ".tmp-" + Guid.NewGuid().ToString("N");
+            File.WriteAllText(temp, JsonSerializer.Serialize(this, Options));
+            File.Move(temp, SettingsPath, overwrite: true);
         }
         catch
         {
@@ -86,15 +91,8 @@ public sealed class AppSettings
         return new ResolvedTools(
             NvttDll: ToolLocator.Find(ToolLocator.NvttDllFileName, NvttDllPath),
             NvttCli: ToolLocator.Find(ToolLocator.NvttCliFileName, NvttCliPath),
-            Oodle: ToolLocator.Find(ToolLocator.OodleFileName, OodlePath),
-            Astcenc: string.IsNullOrWhiteSpace(AstcencPath) ? null : (File.Exists(AstcencPath) ? AstcencPath : null),
-            Texconv: string.IsNullOrWhiteSpace(TexconvPath) ? null : (File.Exists(TexconvPath) ? TexconvPath : null));
+            Oodle: ToolLocator.Find(ToolLocator.OodleFileName, OodlePath));
     }
 }
 
-public sealed record ResolvedTools(string? NvttDll, string? NvttCli, string? Oodle, string? Astcenc, string? Texconv)
-{
-    public bool HasNvtt => NvttDll is not null;
-    public bool HasNvttCli => NvttCli is not null;
-    public bool HasOodle => Oodle is not null;
-}
+public sealed record ResolvedTools(string? NvttDll, string? NvttCli, string? Oodle);

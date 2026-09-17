@@ -1,4 +1,4 @@
-using Xt1.Core.Codecs;
+﻿using Xt1.Core.Codecs;
 using Xt1.Core.Containers;
 using Xt1.Core.Format;
 using Xt1.Core.Imaging;
@@ -30,13 +30,13 @@ internal static class DecodeExport
             return 2;
         }
 
-        int? index = GetIntOption(args, "--index");
-        uint? hash = GetUIntOption(args, "--hash");
-        int? bankIndex = GetIntOption(args, "--bank");
-        int mip = GetIntOption(args, "--mip") ?? 0;
-        int slice = GetIntOption(args, "--slice") ?? 0;
-        int? pitchOverride = GetIntOption(args, "--pitch");
-        int? blockHeightOverride = GetIntOption(args, "--blockheight");
+        int? index = CliOptions.GetInt(args, "--index");
+        uint? hash = CliOptions.GetUInt(args, "--hash");
+        int? bankIndex = CliOptions.GetInt(args, "--bank");
+        int mip = CliOptions.GetInt(args, "--mip") ?? 0;
+        int slice = CliOptions.GetInt(args, "--slice") ?? 0;
+        int? pitchOverride = CliOptions.GetInt(args, "--pitch");
+        int? blockHeightOverride = CliOptions.GetInt(args, "--blockheight");
         bool noDeswizzle = args.Contains("--no-deswizzle");
         bool all = args.Contains("--all");
         bool scan = args.Contains("--scan-layouts");
@@ -163,12 +163,24 @@ internal static class DecodeExport
             return TextureCodec.DecodeLinear(raw, info.Width, info.Height, format, out error);
         }
 
-        // Custom deswizzle: the standard algorithm but with a forced pitch, which the row stride
-        // (image_width_in_gobs) feeds into.
-        int surfaceSize = pitch * rows * Math.Max(1, info.SliceCount);
-        var surface = new byte[Math.Max(surfaceSize, info.SliceCount * pitch * rows)];
+        // The standard tiler with a forced pitch (and block height). Routing through GobSwizzle keeps
+        // this identical to the default decode, including the depth interleave for 3D mips.
+        int surfaceSize = info.BlockDepth > 1
+            ? GobSwizzle.VolumeSize(wb, hb, Math.Max(1, info.SliceCount), bpb, blockHeight, info.BlockDepth, pitch)
+            : GobSwizzle.SurfaceSize(wb, hb, bpb, blockHeight, pitch);
+        var surface = new byte[surfaceSize];
         texture.Payload.AsSpan((int)offset, Math.Min(available, surface.Length)).CopyTo(surface);
-        DeswizzleWithPitch(surface, linear, wb, hb, bpb, blockHeight, widthInGobs);
+
+        if (info.BlockDepth > 1)
+        {
+            GobSwizzle.DeswizzleVolume(surface, linear, wb, hb, Math.Max(1, info.SliceCount), bpb,
+                blockHeight, info.BlockDepth, pitch);
+        }
+        else
+        {
+            GobSwizzle.Deswizzle(surface, linear, wb, hb, bpb, blockHeight, pitch);
+        }
+
         return TextureCodec.DecodeLinear(linear, info.Width, info.Height, format, out error);
     }
 
@@ -202,8 +214,17 @@ internal static class DecodeExport
                 var linear = new byte[info.WidthBlocks * info.HeightBlocks * bpb];
                 var buffer = new byte[(int)surface];
                 texture.Payload.AsSpan((int)info.Offset, (int)surface).CopyTo(buffer);
-                DeswizzleWithPitch(buffer, linear, info.WidthBlocks, info.HeightBlocks, bpb,
-                    blockHeight, pitch / 64);
+                // Same shared tiler as the real decode, so a geometry that scores well here behaves
+                // identically if it is adopted.
+                if (info.BlockDepth > 1)
+                {
+                    GobSwizzle.DeswizzleVolume(buffer, linear, info.WidthBlocks, info.HeightBlocks,
+                        Math.Max(1, info.SliceCount), bpb, blockHeight, info.BlockDepth, pitch);
+                }
+                else
+                {
+                    GobSwizzle.Deswizzle(buffer, linear, info.WidthBlocks, info.HeightBlocks, bpb, blockHeight, pitch);
+                }
 
                 var image = TextureCodec.DecodeLinear(linear, info.Width, info.Height, texture.FormatInfo, out var decodeError);
                 if (image is null)
@@ -274,57 +295,4 @@ internal static class DecodeExport
 
     private static int payloadLength(EditableTexture texture) => texture.Payload.Length;
 
-    /// <summary>2D deswizzle with an explicit GOB pitch (everything else identical to the standard).</summary>
-    private static void DeswizzleWithPitch(
-        byte[] source, byte[] destination, int widthBlocks, int heightBlocks,
-        int bytesPerBlock, int blockHeight, int widthInGobs)
-    {
-        int blockSizeInBytes = GobSwizzle.GobSizeInBytes * blockHeight;
-        int blockHeightInBytes = GobSwizzle.GobHeightInBytes * blockHeight;
-        int rowBytes = widthBlocks * bytesPerBlock;
-        for (int y = 0; y < heightBlocks; y++)
-        {
-            int offsetY = (y / blockHeightInBytes) * blockSizeInBytes * widthInGobs
-                        + (y % blockHeightInBytes) / GobSwizzle.GobHeightInBytes * GobSwizzle.GobSizeInBytes;
-            int destRow = y * rowBytes;
-            for (int x = 0; x < rowBytes; x++)
-            {
-                int swizzled = offsetY
-                             + (x / GobSwizzle.GobWidthInBytes) * blockSizeInBytes
-                             + GobOffset(x % GobSwizzle.GobWidthInBytes, y % GobSwizzle.GobHeightInBytes);
-                if (swizzled < source.Length)
-                    destination[destRow + x] = source[swizzled];
-            }
-        }
-    }
-
-    private static int GobOffset(int x, int y) =>
-        (x % 64) / 32 * 256 + (y % 8) / 2 * 64 + (x % 32) / 16 * 32 + (y % 2) * 16 + (x % 16);
-
-    private static string? GetOption(string[] args, string name)
-    {
-        int at = Array.IndexOf(args, name);
-        return at >= 0 && at + 1 < args.Length ? args[at + 1] : null;
-    }
-
-    private static int? GetIntOption(string[] args, string name)
-    {
-        var value = GetOption(args, name);
-        if (value is null) return null;
-        return int.TryParse(value, out int parsed) ? parsed
-            : value.StartsWith("0x", StringComparison.OrdinalIgnoreCase) &&
-              int.TryParse(value[2..], System.Globalization.NumberStyles.HexNumber, null, out parsed)
-                ? parsed
-                : null;
-    }
-
-    private static uint? GetUIntOption(string[] args, string name)
-    {
-        var value = GetOption(args, name);
-        if (value is null) return null;
-        var text = value.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? value[2..] : value;
-        return uint.TryParse(text, System.Globalization.NumberStyles.HexNumber, null, out uint parsed)
-            ? parsed
-            : uint.TryParse(value, out parsed) ? parsed : null;
-    }
 }

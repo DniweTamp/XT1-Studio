@@ -1,4 +1,4 @@
-using Xt1.Core.Format;
+﻿using Xt1.Core.Format;
 using Xt1.Core.Util;
 
 namespace Xt1.Core.Xt1;
@@ -66,7 +66,6 @@ public sealed class Xt1Header
     /// <summary>Snapshot the current bytes as the "original" reference.</summary>
     public void AcceptOriginal() => _raw.CopyTo(_original, 0);
 
-    public void RestoreOriginal() => _original.CopyTo(_raw, 0);
 
     public Xt1Header Clone() => new((byte[])_raw.Clone(), (byte[])_original.Clone());
 

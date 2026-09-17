@@ -52,6 +52,17 @@ internal static class SelfCheck
                 return $"{Path.GetFileName(oodle.LibraryPath)} compression={oodle.SupportsCompression}";
             });
 
+            if (oodle is not null)
+            {
+                // Round-trips through the codec itself, so a decompress-only build is reported as a
+                // property of the DLL rather than discovered later during a save.
+                Check("oodle self test", () =>
+                {
+                    oodle.SelfTest(out var message);
+                    return message;
+                });
+            }
+
             Check("nvtt load", () =>
             {
                 nvtt = NvttNative.TryCreate(out var error, tools.NvttDll);

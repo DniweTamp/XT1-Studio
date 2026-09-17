@@ -97,6 +97,45 @@ public class DatRangeTests
     }
 
     [Fact]
+    public void GrownSubFile_RepacksInsteadOfOverwritingItsNeighbour()
+    {
+        if (!TestPaths.Exists(TestPaths.Em0000Dat)) return;
+
+        var dat = DatFile.Parse(File.ReadAllBytes(TestPaths.Em0000Dat));
+
+        // Find a sub-file whose original range is followed immediately by another (no slack), so
+        // growing it is guaranteed to run into the neighbour if the layout is not repacked.
+        int index = -1;
+        for (int i = 0; i < dat.SubFiles.Count && index < 0; i++)
+        {
+            long end = (long)dat.SubFiles[i].OriginalOffset + dat.SubFiles[i].OriginalLength;
+            for (int j = 0; j < dat.SubFiles.Count; j++)
+            {
+                if (j == i || dat.SubFiles[j].OriginalOffset != end) continue;
+                index = i;
+                break;
+            }
+        }
+        Assert.True(index >= 0, "expected a zero-slack sub-file pair in em0000.dat to grow");
+
+        var target = dat.SubFiles[index];
+        var grown = new byte[target.Bytes.Length + 64];
+        target.Bytes.CopyTo(grown, 0);
+        for (int i = target.Bytes.Length; i < grown.Length; i++) grown[i] = 0xAB;
+        target.Bytes = grown;
+
+        Assert.True(dat.IsStructureDirty, "outgrowing the original slot must be treated as structural");
+
+        var rebuilt = DatFile.Parse(dat.ToBytes());
+        Assert.Equal(dat.SubFiles.Count, rebuilt.SubFiles.Count);
+        for (int i = 0; i < dat.SubFiles.Count; i++)
+        {
+            Assert.True(dat.SubFiles[i].Bytes.AsSpan().SequenceEqual(rebuilt.SubFiles[i].Bytes),
+                $"sub-file {i} (\"{dat.SubFiles[i].Tag}\") was overwritten by a neighbour");
+        }
+    }
+
+    [Fact]
     public void SimpleContainers_RebuildByteIdentically()
     {
         // These have plain monotonic layouts, so the rebuild path must still round-trip exactly.
@@ -108,5 +147,104 @@ public class DatRangeTests
             Assert.True(original.AsSpan().SequenceEqual(rebuilt),
                 $"{Path.GetFileName(path)} rebuild is not byte-identical");
         }
+    }
+
+    [Fact]
+    public void GrownSubFile_ForcesAStructuralRebuildAndKeepsNeighboursIntact()
+    {
+        var dat = DatFile.Parse(BuildTwoSubFileDat());
+        Assert.False(dat.IsStructureDirty);
+
+        var target = dat.SubFiles[0];
+        var grown = new byte[target.Bytes.Length + 32];
+        target.Bytes.CopyTo(grown, 0);
+        for (int i = target.Bytes.Length; i < grown.Length; i++) grown[i] = 0xAB;
+        target.Bytes = grown;
+
+        Assert.True(dat.IsStructureDirty, "growing a sub-file must mark the container structural");
+
+        var rebuilt = DatFile.Parse(dat.ToBytes());
+        Assert.Equal(2, rebuilt.SubFiles.Count);
+        Assert.Equal(grown.Length, rebuilt.SubFiles[0].Bytes.Length);
+        Assert.True(grown.AsSpan().SequenceEqual(rebuilt.SubFiles[0].Bytes));
+        Assert.True(dat.SubFiles[1].Bytes.AsSpan().SequenceEqual(rebuilt.SubFiles[1].Bytes),
+            "the following sub-file must not be overwritten by the grown one");
+    }
+
+    [Fact]
+    public void GrownSubFile_WithPinnedManualOffsets_IsRefusedInsteadOfOverlapping()
+    {
+        var dat = DatFile.Parse(BuildTwoSubFileDat());
+        dat.RecomputeOffsetsOnWrite = false;
+
+        var target = dat.SubFiles[0];
+        var grown = new byte[target.Bytes.Length + 32];
+        target.Bytes.CopyTo(grown, 0);
+        target.Bytes = grown;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => dat.ToBytes());
+        Assert.Contains("outgrew", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Two contiguous 16-byte sub-files with no slack, so growth must repack or overlap.</summary>
+    private static byte[] BuildTwoSubFileDat()
+    {
+        const int n = 2;
+        const int slot = 8;
+        int pOffsets = 0x20;
+        int pTags = pOffsets + 4 * n;
+        int pNames = pTags + 4 * n;
+        int pDesc = Align4(pNames + 4 + slot * n);
+        int pExtra = Align4(pDesc + 4 * n);
+        uint baseOffset = (uint)pExtra;
+        var output = new byte[baseOffset + 32];
+
+        U32(output, 0x00, DatFile.MagicValue);
+        U32(output, 0x04, n);
+        U32(output, 0x08, (uint)pOffsets);
+        U32(output, 0x0C, (uint)pTags);
+        U32(output, 0x10, (uint)pNames);
+        U32(output, 0x14, (uint)pDesc);
+        U32(output, 0x18, (uint)pExtra);
+
+        U32(output, pOffsets, baseOffset);
+        U32(output, pOffsets + 4, baseOffset + 16);
+
+        WriteTag(output, pTags, "wta");
+        WriteTag(output, pTags + 4, "wtp");
+
+        U32(output, pNames, slot);
+        WriteName(output, pNames + 4, "first", slot);
+        WriteName(output, pNames + 4 + slot, "second", slot);
+
+        U32(output, pDesc, 16);
+        U32(output, pDesc + 4, 16);
+
+        for (int i = 0; i < 16; i++)
+        {
+            output[baseOffset + i] = (byte)(i + 1);
+            output[baseOffset + 16 + i] = (byte)(0x80 + i);
+        }
+        return output;
+    }
+
+    private static int Align4(int value) => (value + 3) & ~3;
+
+    private static void U32(byte[] b, int at, uint value)
+    {
+        b[at] = (byte)value;
+        b[at + 1] = (byte)(value >> 8);
+        b[at + 2] = (byte)(value >> 16);
+        b[at + 3] = (byte)(value >> 24);
+    }
+
+    private static void WriteTag(byte[] b, int at, string tag)
+    {
+        for (int i = 0; i < 4; i++) b[at + i] = i < tag.Length ? (byte)tag[i] : (byte)0;
+    }
+
+    private static void WriteName(byte[] b, int at, string name, int slot)
+    {
+        for (int i = 0; i < slot; i++) b[at + i] = i < name.Length ? (byte)name[i] : (byte)0;
     }
 }

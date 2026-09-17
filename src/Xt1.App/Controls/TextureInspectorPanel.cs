@@ -31,6 +31,7 @@ public sealed class TextureInspectorPanel : UserControl
     private static readonly Color WarnColor = Color.FromArgb(170, 32, 32);
     private static readonly Color OkColor = Color.FromArgb(62, 118, 70);
     private static readonly Color OkBack = Color.FromArgb(240, 248, 240);
+    private static readonly Color PendingBack = Color.FromArgb(244, 244, 250);
 
     /// <summary>One shared tooltip for the whole panel; a per-control instance would be collected.</summary>
     private static readonly ToolTip Tips = new();
@@ -259,15 +260,25 @@ public sealed class TextureInspectorPanel : UserControl
 
     /// <summary>
     /// Show the validation verdict. <paramref name="decodeError"/> means the texture could not be
-    /// decoded at all, which is the case worth shouting about.
+    /// decoded at all, which is the case worth shouting about. <paramref name="pending"/> is used
+    /// while a volume is still being decoded off the UI thread, so the card never asserts a verdict
+    /// it does not have yet.
     /// </summary>
-    public void SetValidation(IReadOnlyList<string> warnings, string? decodeError)
+    public void SetValidation(IReadOnlyList<string> warnings, string? decodeError, bool pending = false)
     {
         var lines = new List<string>();
         if (decodeError is not null) lines.Add("Decode failed: " + decodeError);
         foreach (var warning in warnings) lines.Add(warning);
 
         bool bad = lines.Count > 0;
+        if (pending && !bad)
+        {
+            _validationCard.BackColor = PendingBack;
+            _validationText.ForeColor = MutedColor;
+            _validationText.Text = "Decoding volume...";
+            return;
+        }
+
         _validationCard.BackColor = bad ? WarnBack : OkBack;
         _validationText.ForeColor = bad ? WarnColor : OkColor;
         _validationText.Text = bad

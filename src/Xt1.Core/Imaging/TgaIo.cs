@@ -1,9 +1,12 @@
-namespace Xt1.Core.Imaging;
+﻿namespace Xt1.Core.Imaging;
 
 /// <summary>Minimal TGA reader/writer (truecolor 24/32-bit, uncompressed and RLE).</summary>
 public static class TgaIo
 {
-    public static bool IsTga(ReadOnlySpan<byte> data) => data.Length >= 18;
+    /// <summary>Same order as the DDS reader's limits, so both import paths reject the same files.</summary>
+    private const int MaxDimension = 8192;
+    private const long MaxPixelBytes = 256L * 1024 * 1024;
+
 
     public static RgbaImage Read(byte[] data)
     {
@@ -27,9 +30,17 @@ public static class TgaIo
         bool topLeft = (descriptor & 0x20) != 0;
         int bytesPerPixel = bpp / 8;
 
+        // The dimensions are 16-bit and untrusted: reject what they claim instead of allocating it,
+        // and size the buffer in long arithmetic so a large product cannot wrap.
+        if (width < 1 || height < 1 || width > MaxDimension || height > MaxDimension)
+            throw new InvalidDataException($"TGA dimensions {width}x{height} are out of range");
+        long pixelBytes = (long)width * height * bytesPerPixel;
+        if (pixelBytes > MaxPixelBytes)
+            throw new InvalidDataException($"TGA of {width}x{height} is too large to decode");
+
         var image = new RgbaImage(width, height);
         int offset = 18 + idLength;
-        var pixels = new byte[width * height * bytesPerPixel];
+        var pixels = new byte[pixelBytes];
         int written = 0;
 
         if (!rle)

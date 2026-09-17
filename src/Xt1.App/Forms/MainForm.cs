@@ -27,7 +27,20 @@ public sealed class MainForm : Form
     private readonly EditHistory _history = new();
     private BatchConverter _batchConverter = null!;
     private CancellationTokenSource? _volumeCts;
+    private CancellationTokenSource? _exportCts;
     private bool _syncingSlices;
+
+    /// <summary>A volume decode is in flight, so slice requests must not start their own.</summary>
+    private bool _volumePending;
+
+    /// <summary>
+    /// Slices of the volume the GL tab decoded, reused for the 2D tab and the validation verdict.
+    /// Decoding one slice of an interleaved volume untiles the whole volume, so repeating it per
+    /// slice (or per trackbar step) would repeat all of that work.
+    /// </summary>
+    private EditableTexture? _volumeSource;
+    private int _volumeSourceMip = -1;
+    private IReadOnlyList<RgbaImage>? _volumeSourceSlices;
 
     /// <summary>Upper bound on slices assembled for one preview, before the texel budget is applied.</summary>
     private const int MaxPreviewSlices = 512;
@@ -616,7 +629,8 @@ public sealed class MainForm : Form
 
     /// <summary>
     /// Tell the inspector whether this texture is trustworthy: the layout/size warnings plus whether
-    /// it actually decodes. Decoding reuses the preview cache, so it is normally free.
+    /// it actually decodes. Decoding reuses the preview cache, so it is normally free; a 3D volume
+    /// defers to the asynchronous volume decode instead of untiling the whole volume here.
     /// </summary>
     private void UpdateInspectorValidation()
     {
@@ -628,6 +642,16 @@ public sealed class MainForm : Form
 
         var warnings = _texture.Validate();
         string? decodeError = null;
+
+        if (_texture.Header.Type.Is3D())
+        {
+            // Decoding a single slice of an interleaved volume untiles the whole volume, and the GL tab
+            // is already doing that off the UI thread. Report the layout warnings now and let the volume
+            // decode supply the verdict (ApplyVolumePreview) instead of blocking the selection.
+            _inspector.SetValidation(warnings, null, pending: true);
+            return;
+        }
+
         var info = _texture.FormatInfo;
         if (!TextureCodec.CanDecode(info))
         {
@@ -761,6 +785,10 @@ public sealed class MainForm : Form
 
     private void RefreshAll()
     {
+        // Any of the callers may have changed payload bytes in place (import, undo, redo, a field
+        // edit), and the cache key cannot see content, so drop the decoded images rather than risk
+        // showing a preview of the previous bytes.
+        _cache.Clear();
         UpdateInfo();
         _inspector.RefreshValues();
         UpdatePreview();
@@ -901,6 +929,7 @@ public sealed class MainForm : Form
         _volumeCts?.Dispose();
         _volumeCts = new CancellationTokenSource();
         var token = _volumeCts.Token;
+        _volumePending = true;
 
         var layout = texture.Layout;
         int sliceCount = layout.Applicable && mip < layout.Mips.Count ? layout.Mips[mip].SliceCount : 1;
@@ -917,6 +946,7 @@ public sealed class MainForm : Form
             if (IsDisposed || token.IsCancellationRequested) return;
             if (task.IsFaulted)
             {
+                _volumePending = false;
                 SetStatus("Volume decode failed: " + task.Exception?.GetBaseException().Message);
                 return;
             }
@@ -941,12 +971,21 @@ public sealed class MainForm : Form
     private void ApplyVolumePreview(EditableTexture texture, int mip, IReadOnlyList<RgbaImage> slices, string? error)
     {
         if (!ReferenceEquals(_texture, texture)) return; // selection changed while decoding
+        _volumePending = false;
         if (slices.Count == 0)
         {
             _viewTabs.SelectedIndex = 0;
+            _inspector.SetValidation(texture.Validate(), error ?? "the volume decoder returned no slice");
             SetStatus(error ?? "Volume decode failed.");
             return;
         }
+
+        // The GL tab has just untiled the whole volume: keep the slices so the 2D tab and the
+        // validation verdict can reuse them instead of untiling the volume again per slice.
+        _volumeSource = texture;
+        _volumeSourceMip = mip;
+        _volumeSourceSlices = slices;
+        _inspector.SetValidation(texture.Validate(), null);
 
         _glPreview.VolumeResolutionCap = _settings.VolumeResolutionCap;
         RgbaImage volume;
@@ -989,8 +1028,22 @@ public sealed class MainForm : Form
     private void UpdateSliceImage()
     {
         if (_texture is null || !_texture.Header.Type.Is3D()) return;
+
+        // While the volume is decoding, wait for it: a per-slice decode would untile the whole volume
+        // on the UI thread, which is the work the async preview is already doing.
+        if (_volumePending) return;
+
         int mip = Math.Max(0, _mipCombo.SelectedIndex);
         int slice = Math.Max(0, _sliceCombo.SelectedIndex);
+
+        var cached = _volumeSourceSlices;
+        if (cached is not null && ReferenceEquals(_volumeSource, _texture) && _volumeSourceMip == mip &&
+            slice < cached.Count)
+        {
+            _imageViewer.SetImage(cached[slice], preserveView: true);
+            return;
+        }
+
         var image = DecodeSubresource(mip, 0, slice, out _);
         if (image is not null) _imageViewer.SetImage(image, preserveView: true);
     }
@@ -1249,25 +1302,31 @@ public sealed class MainForm : Form
 
             using var options = new TextureImportDialog(Path.GetFileName(dialog.FileName), image,
                 _texture.FormatInfo ?? FormatTable.Get(Xt1Format.Bc7Unorm)!, CurrentBackend,
-                _settings.GenerateMips ? EncodeQuality.Normal : EncodeQuality.Normal,
+                EncodeQuality.Normal,
                 _settings.GenerateMips, canBeCube: true, defaultCube: cubeFaces is not null);
             if (options.ShowDialog(this) != DialogResult.OK) return;
 
+            // Captured before the format is switched: the undo snapshot inside the operation must
+            // record the header as it was, otherwise undoing leaves the new format over the old
+            // payload. The same snapshot restores the header if the encode fails.
+            var originalHeader = _texture.Header.Raw.ToArray();
             _texture.Header.Format = options.SelectedFormat.Format;
             var encoder = _batchConverter.Pick(options.Backend, options.SelectedFormat);
 
             OperationResult result;
             if (options.IsCube && cubeFaces is not null)
             {
-                result = TextureOperations.ReplaceCube(_texture, cubeFaces, encoder, options.GenerateMips, options.Quality);
+                result = TextureOperations.ReplaceCube(_texture, cubeFaces, encoder, options.GenerateMips, options.Quality, originalHeader);
             }
             else
             {
-                result = TextureOperations.Replace2D(_texture, image, encoder, options.GenerateMips, options.Quality);
+                result = TextureOperations.Replace2D(_texture, image, encoder, options.GenerateMips, options.Quality, originalHeader);
             }
 
             if (!result.Success)
             {
+                originalHeader.CopyTo(_texture.Header.Raw, 0);
+                RefreshAll();
                 SetStatus("Import failed: " + result.Error);
                 return;
             }
@@ -1451,32 +1510,19 @@ public sealed class MainForm : Form
     }
 
     /// <summary>Export every texture of the selected bank (mip 0) as PNG into one folder.</summary>
-    private void ExportBankTextures()
+    private async void ExportBankTextures()
     {
         if (_section is null) return;
         using var dialog = new FolderBrowserDialog { Description = $"Choose an output folder for {_section.Label}" };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
-        int exported = 0, skipped = 0;
-        foreach (var texture in _section.Bank.Textures.ToList())
-        {
-            var image = TextureCodec.Decode(texture, 0, 0, 0, out _);
-            if (image is null)
-            {
-                skipped++;
-                continue;
-            }
-            var path = Path.Combine(dialog.SelectedPath, $"tex{texture.Index}_0x{texture.EffectiveHash():X8}.png");
-            ImageIo.Save(image, path);
-            exported++;
-        }
-
-        SetStatus($"Exported {exported} texture(s) from {_section.Label}" +
-                  (skipped == 0 ? "." : $", skipped {skipped} that could not be decoded."));
+        var textures = _section.Bank.Textures.ToList();
+        await ExportTexturesAsync(textures, dialog.SelectedPath, _section.Label,
+            texture => $"tex{texture.Index}_0x{texture.EffectiveHash():X8}.png");
     }
 
     /// <summary>Export mip 0 of every texture in every bank of the container into one folder.</summary>
-    private void ExportContainerTextures()
+    private async void ExportContainerTextures()
     {
         if (_document is null) return;
         using var dialog = new FolderBrowserDialog { Description = "Choose an output folder for this container" };
@@ -1489,23 +1535,63 @@ public sealed class MainForm : Form
             return;
         }
 
-        int exported = 0, skipped = 0;
         string stem = Path.GetFileNameWithoutExtension(_document.FilePath ?? "container");
-        foreach (var texture in textures)
-        {
-            var image = TextureCodec.Decode(texture, 0, 0, 0, out _);
-            if (image is null)
-            {
-                skipped++;
-                continue;
-            }
-            var path = Path.Combine(dialog.SelectedPath, $"{stem}_tex{texture.Index}_0x{texture.EffectiveHash():X8}.png");
-            ImageIo.Save(image, path);
-            exported++;
-        }
+        await ExportTexturesAsync(textures, dialog.SelectedPath, "container",
+            texture => $"{stem}_tex{texture.Index}_0x{texture.EffectiveHash():X8}.png");
+    }
 
-        SetStatus($"Exported {exported} texture(s)" +
-                  (skipped == 0 ? "." : $", skipped {skipped} that could not be decoded."));
+    /// <summary>
+    /// Decode and PNG-encode a set of textures off the UI thread with progress reports. A container can
+    /// hold thousands of textures, so running this inline froze the window for the whole export.
+    /// </summary>
+    private async Task ExportTexturesAsync(IReadOnlyList<EditableTexture> textures, string folder,
+        string what, Func<EditableTexture, string> fileName)
+    {
+        _exportCts?.Cancel();
+        _exportCts?.Dispose();
+        _exportCts = new CancellationTokenSource();
+        var token = _exportCts.Token;
+
+        IProgress<int> progress = new Progress<int>(done =>
+        {
+            if (!IsDisposed) SetStatus($"Exporting {what}: {done}/{textures.Count}...");
+        });
+
+        try
+        {
+            var (exported, skipped) = await Task.Run(() =>
+            {
+                int ok = 0, failed = 0, done = 0;
+                foreach (var texture in textures)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var image = TextureCodec.Decode(texture, 0, 0, 0, out _);
+                    if (image is null)
+                    {
+                        failed++;
+                    }
+                    else
+                    {
+                        ImageIo.Save(image, Path.Combine(folder, fileName(texture)));
+                        ok++;
+                    }
+                    if (++done % 16 == 0) progress.Report(done);
+                }
+                progress.Report(done);
+                return (ok, failed);
+            }, token);
+
+            SetStatus($"Exported {exported} texture(s) from {what}" +
+                      (skipped == 0 ? "." : $", skipped {skipped} that could not be decoded."));
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("Export canceled.");
+        }
+        catch (Exception ex)
+        {
+            SetStatus("Export failed: " + ex.Message);
+        }
     }
 
     /// <summary>Raw hex lives in its own dialog now that the right-hand side is a single panel.</summary>
@@ -1615,7 +1701,8 @@ public sealed class MainForm : Form
         return Task.Run(() =>
         {
             var options = new BatchOptions(request.TargetFormat, request.Backend, request.Quality,
-                request.GenerateMips, request.OverwriteInPlace, request.OutputDirectory);
+                request.GenerateMips, request.OverwriteInPlace, request.OutputDirectory,
+                request.InputRootDirectory);
             _batchConverter.Run(files, options, progress, token);
         }, token);
     }

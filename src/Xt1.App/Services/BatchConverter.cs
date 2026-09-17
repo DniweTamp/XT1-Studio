@@ -14,7 +14,8 @@ public sealed record BatchOptions(
     EncodeQuality Quality,
     bool GenerateMips,
     bool OverwriteInPlace,
-    string? OutputDirectory);
+    string? OutputDirectory,
+    string? InputRootDirectory = null);
 
 /// <summary>
 /// Converts every 2D texture in a set of banks to a target format. Cubemaps and 3D textures are
@@ -140,6 +141,10 @@ public sealed class BatchConverter
                 var writeOptions = new WriteOptions
                 {
                     OutputDirectory = options.OverwriteInPlace ? null : options.OutputDirectory,
+                    // Keep the input's sub-folder structure under the output directory. Without it the
+                    // outputs are flattened, so "a/model.dat" and "b/model.dat" both become
+                    // "out/model.dat" and the second silently replaces the first.
+                    OutputBaseName = options.OverwriteInPlace ? null : RelativeBaseName(file, options),
                     RecompressOodle = _settings.RecompressOodleOnSave,
                     OodlePath = _settings.Resolve().Oodle,
                 };
@@ -152,5 +157,22 @@ public sealed class BatchConverter
                 log.Report($"    failed: {ex.Message}");
             }
         }
+    }
+
+    /// <summary>
+    /// The output base name for one input, including its path relative to the batch root, so two inputs
+    /// with the same file name in different sub-folders cannot collide.
+    /// </summary>
+    private static string RelativeBaseName(string file, BatchOptions options)
+    {
+        if (string.IsNullOrEmpty(options.InputRootDirectory)) return Path.GetFileNameWithoutExtension(file);
+
+        var relative = Path.GetRelativePath(options.InputRootDirectory, file);
+        if (relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+            return Path.GetFileNameWithoutExtension(file); // outside the root: fall back to the name
+
+        var directory = Path.GetDirectoryName(relative);
+        var name = Path.GetFileNameWithoutExtension(relative);
+        return string.IsNullOrEmpty(directory) ? name : Path.Combine(directory, name);
     }
 }

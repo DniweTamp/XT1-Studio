@@ -10,6 +10,7 @@ public sealed class DatSubFile
     private string _name;
     private uint _offset;
     private uint _descriptorSize;
+    private byte[] _bytes = Array.Empty<byte>();
 
     /// <summary>The container this sub-file belongs to, used to flag structural edits.</summary>
     internal DatFile? Owner { get; set; }
@@ -36,8 +37,23 @@ public sealed class DatSubFile
         }
     }
 
-    /// <summary>Current content. Replacing this marks the sub-file dirty (size may change).</summary>
-    public byte[] Bytes { get; set; }
+    /// <summary>
+    /// Current content. Replacing it marks the sub-file dirty, and marks the container structurally
+    /// dirty when the new content outgrows the original slot: at the original offset those bytes would
+    /// spill over the following sub-file, which is then written on top of them. Shrinking is left
+    /// alone, since a smaller sub-file only leaves a gap and keeps the layout byte-identical.
+    /// </summary>
+    public byte[] Bytes
+    {
+        get => _bytes;
+        set
+        {
+            _bytes = value;
+            // OriginalBytes is assigned before this setter first runs, so the constructor's own
+            // assignment compares equal and cannot mark the container dirty by accident.
+            if (OutgrewSlot) Owner?.MarkStructureDirty();
+        }
+    }
 
     public byte[] OriginalBytes { get; }
 
@@ -72,15 +88,24 @@ public sealed class DatSubFile
     public int OriginalLength => OriginalBytes.Length;
     public bool IsDirty => !Bytes.AsSpan().SequenceEqual(OriginalBytes);
 
+    /// <summary>
+    /// True when the current content is longer than the original slot it was parsed from. This is the
+    /// single definition of "the sub-file outgrew its slot": at the original offset those bytes would
+    /// spill over the following sub-file, so the content setter uses it to mark the container
+    /// structural and the rebuild uses it to decide whether a repack is required.
+    /// </summary>
+    public bool OutgrewSlot => Bytes.Length > OriginalLength;
+
     public DatSubFile(string tag, string name, byte[] bytes, uint offset, uint descriptorSize)
     {
         _tag = tag;
         _name = name;
+        // OriginalBytes first: the Bytes setter compares against the original slot size.
+        OriginalBytes = (byte[])bytes.Clone();
         Bytes = bytes;
         _offset = offset;
         _descriptorSize = descriptorSize;
         OriginalOffset = offset;
-        OriginalBytes = (byte[])bytes.Clone();
     }
 
     public override string ToString() => $"\"{Tag}\" {Name} ({Bytes.Length} bytes)";
@@ -269,28 +294,6 @@ public sealed class DatFile
         return fallback;
     }
 
-    public void AddSubFile(DatSubFile subFile)
-    {
-        subFile.Owner = this;
-        _subFiles.Add(subFile);
-        MarkStructureDirty();
-    }
-
-    public bool RemoveSubFile(DatSubFile subFile)
-    {
-        bool removed = _subFiles.Remove(subFile);
-        if (removed) MarkStructureDirty();
-        return removed;
-    }
-
-    public void MoveSubFile(int from, int to)
-    {
-        var item = _subFiles[from];
-        _subFiles.RemoveAt(from);
-        _subFiles.Insert(to, item);
-        MarkStructureDirty();
-    }
-
     /// <summary>Serialize the container. Untouched sub-files keep their exact bytes.</summary>
     private byte[] ToBytesRebuild()
     {
@@ -324,8 +327,25 @@ public sealed class DatFile
         // Assign offsets. When the container's structure is untouched each sub-file stays at its
         // original offset, which preserves aliased regions, stub entries and trailing padding
         // exactly; only a structural edit (or manual offsets) repacks contiguously.
+        //
+        // A sub-file that outgrew its original slot must repack even if nothing else marked the
+        // container: at the original offset its bytes would run over the next sub-file, which is
+        // then written on top of them, silently truncating the grown sub-file. "Outgrew" has one
+        // definition, DatSubFile.OutgrewSlot, shared with the content setter's dirty marking.
+        bool outgrewSlot = _subFiles.Exists(s => s.OutgrewSlot);
+
+        // Manual offsets pin every sub-file, so a grown one cannot be moved out of its neighbour's
+        // way. Refuse rather than emit overlapping bytes; silently repacking would discard the
+        // user's pinned offsets, which is the point of this mode.
+        if (outgrewSlot && !RecomputeOffsetsOnWrite)
+            throw new InvalidOperationException(
+                "a sub-file outgrew its original slot while manual offsets are active; writing at " +
+                "the pinned offsets would truncate it under the following sub-file. Re-enable " +
+                "automatic offset recomputation (or shrink the sub-file back) before saving.");
+
+        bool structural = _structureDirty || outgrewSlot;
         var offsets = new uint[n];
-        if (_structureDirty && RecomputeOffsetsOnWrite)
+        if (structural && RecomputeOffsetsOnWrite)
         {
             long cursor = baseOffset;
             for (int i = 0; i < n; i++)
@@ -334,7 +354,7 @@ public sealed class DatFile
                 cursor += _subFiles[i].Bytes.Length;
             }
         }
-        else if (_structureDirty)
+        else if (structural)
         {
             for (int i = 0; i < n; i++)
                 offsets[i] = _subFiles[i].Offset;
@@ -345,7 +365,7 @@ public sealed class DatFile
                 offsets[i] = _subFiles[i].OriginalOffset;
         }
 
-        long totalLength = _structureDirty ? baseOffset : _originalFileBytes.Length;
+        long totalLength = structural ? baseOffset : _originalFileBytes.Length;
         for (int i = 0; i < n; i++)
             totalLength = Math.Max(totalLength, (long)offsets[i] + _subFiles[i].Bytes.Length);
 

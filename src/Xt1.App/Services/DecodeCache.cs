@@ -14,8 +14,15 @@ public sealed class DecodeCache
 
     public int Capacity { get; set; } = 64;
 
+    /// <summary>
+    /// Identity of one decodable subresource. Format, dimensions and mip count are included because a
+    /// header edit changes the decode; payload *content* of the same length is not visible here, which
+    /// is why <c>RefreshAll</c> clears the cache after any edit.
+    /// </summary>
     public static string Key(EditableTexture texture, int mip, int face, int slice) =>
-        $"{texture.Index}|{mip}|{face}|{slice}|{texture.Header.FormatValue:X}|{texture.Payload.Length}";
+        $"{texture.Index}|{mip}|{face}|{slice}|{texture.Header.FormatValue:X}|" +
+        $"{texture.Header.Width}x{texture.Header.Height}x{texture.Header.Depth}|{texture.Header.MipCount}|" +
+        $"{texture.Payload.Length}";
 
     public bool TryGet(string key, out RgbaImage? image)
     {

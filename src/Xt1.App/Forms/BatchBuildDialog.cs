@@ -153,7 +153,8 @@ public sealed class BatchBuildDialog : Form
             (EncodeQuality)(_quality.SelectedItem ?? EncodeQuality.Normal),
             _mips.Checked,
             _inPlace.Checked,
-            _inPlace.Checked ? null : _output.Text);
+            _inPlace.Checked ? null : _output.Text,
+            _folder.Text);
 
         _log.Clear();
         _progress.Maximum = files.Count;
@@ -200,4 +201,5 @@ public sealed record BatchRequest(
     EncodeQuality Quality,
     bool GenerateMips,
     bool OverwriteInPlace,
-    string? OutputDirectory);
+    string? OutputDirectory,
+    string? InputRootDirectory = null);

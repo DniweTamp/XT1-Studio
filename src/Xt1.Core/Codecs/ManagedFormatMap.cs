@@ -7,6 +7,9 @@ namespace Xt1.Core.Codecs;
 /// The one authoritative XT1 format to BCnEncoder <see cref="CompressionFormat"/> mapping, plus
 /// the managed encode/decode capability flags. Both the decoder and the managed encoder derive
 /// from this so a new format cannot be added to one path and forgotten in the other.
+///
+/// Formats the managed path cannot handle correctly are reported as unsupported so they route to
+/// NVTT instead: signed BC4/BC5 (BCnEncoder has no signed variants) and BC6H encoding.
 /// </summary>
 public static class ManagedFormatMap
 {
@@ -50,13 +53,15 @@ public static class ManagedFormatMap
                 compression = CompressionFormat.Bc3;
                 return true;
             case Xt1Format.Bc4Unorm:
-            case Xt1Format.Bc4Snorm:
                 compression = CompressionFormat.Bc4;
                 return true;
             case Xt1Format.Bc5Unorm:
-            case Xt1Format.Bc5Snorm:
                 compression = CompressionFormat.Bc5;
                 return true;
+            // Bc4Snorm/Bc5Snorm are deliberately absent. BCnEncoder's Bc4/Bc5 are unsigned, so using
+            // them would decode signed data as unsigned and re-encode it as unsigned under a SNORM
+            // header. Routing them to NVTT (which has BC4_SIGNED/BC5_SIGNED) is correct; with no NVTT
+            // available the operation is refused rather than silently writing the wrong blocks.
             case Xt1Format.Bc7Unorm:
             case Xt1Format.Bc7Srgb:
                 compression = CompressionFormat.Bc7;

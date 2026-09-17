@@ -1,4 +1,4 @@
-using Xt1.Core.Encoding;
+﻿using Xt1.Core.Encoding;
 using Xt1.Core.Format;
 using Xt1.Core.Settings;
 
@@ -10,8 +10,6 @@ public sealed class SettingsDialog : Form
     private readonly TextBox _nvttDll = new() { Width = 420 };
     private readonly TextBox _nvttCli = new() { Width = 420 };
     private readonly TextBox _oodle = new() { Width = 420 };
-    private readonly TextBox _astcenc = new() { Width = 420 };
-    private readonly TextBox _texconv = new() { Width = 420 };
     private readonly ComboBox _backend = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 180 };
     private readonly ComboBox _defaultFormat = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 240 };
     private readonly CheckBox _generateMips = new() { Text = "Generate full mip chains on import", AutoSize = true };
@@ -61,15 +59,11 @@ public sealed class SettingsDialog : Form
         _nvttDll.Text = settings.NvttDllPath ?? string.Empty;
         _nvttCli.Text = settings.NvttCliPath ?? string.Empty;
         _oodle.Text = settings.OodlePath ?? string.Empty;
-        _astcenc.Text = settings.AstcencPath ?? string.Empty;
-        _texconv.Text = settings.TexconvPath ?? string.Empty;
 
         int row = 0;
         AddPathRow(table, ref row, "nvtt30205.dll", _nvttDll);
         AddPathRow(table, ref row, "nvtt_export.exe", _nvttCli);
         AddPathRow(table, ref row, "oo2core DLL", _oodle);
-        AddPathRow(table, ref row, "astcenc.exe", _astcenc);
-        AddPathRow(table, ref row, "texconv.exe", _texconv);
 
         AddRow(table, ref row, "Preferred backend", _backend);
         AddRow(table, ref row, "Default import format", _defaultFormat);
@@ -108,8 +102,6 @@ public sealed class SettingsDialog : Form
             Result.NvttDllPath = NullIfEmpty(_nvttDll.Text);
             Result.NvttCliPath = NullIfEmpty(_nvttCli.Text);
             Result.OodlePath = NullIfEmpty(_oodle.Text);
-            Result.AstcencPath = NullIfEmpty(_astcenc.Text);
-            Result.TexconvPath = NullIfEmpty(_texconv.Text);
         }
     }
 

@@ -93,13 +93,13 @@ These were re-derived from `D:\Bayonetta3\romfs` and are locked by tests:
 | --- | --- |
 | 2D imageSize | Per-mip `align512(pitch * round_up(heightBlocks, lines))`; verified over the whole `pl/` + `em/` census |
 | 3D imageSize | Per-mip `align512(prev) + surface2d(w_m, h_m) * max(1, depth >> m)` (mip-major, slice-minor); verified on all `core.dat` 3D records incl. 128³/8 mips |
-| Cube imageSize | `6 * align4096(faceSize)`; verified on three independent cube groups |
-| Anomalies (warn, never fatal) | Multi-mip ASTC 5×5/6×6 at large dimensions (915456 / 1385472 / 4596736) are **not** explained by pitch or by 64-block width padding; they stay flagged and copied verbatim (**51 records**, 39 of which leak surface padding). The single-mip form of the same class and the tiny-cube class are both solved |
+| Cube imageSize | `6 * faceStride`, where `faceStride = align4096(faceSize)` only when the base mip surface is >= 4096 bytes; verified on every cube group |
+| Wide pitch (`tile_width_spacing = 4`) | A record with `blockHeightLog2 == 3` whose base-mip row is not 1024-aligned widens every non-"small" mip to a 1024-byte pitch. This explains the former multi-mip ASTC 5×5/6×6 class exactly (915456 / 1385472 / 4596736), so **no record is left flagged**; the layout exposes it as `WidePitchApplied` and the tree dump counts `widePitch` |
 | DAT container | 4-byte descriptor = sub-file size; tables 4-byte aligned; sub-files packed contiguously; `.dtt` payload base is 0x1000. Offsets are **not always monotonic**: stub entries are `0` and some sub-files alias a region nested inside another (`es*.dat` keeps its `"wta"` inside its embedded `"eff"` DAT), so a sub-file range comes from the declared size when it fits |
 | GOB swizzle | Tegra block-linear. A GOB is 64x8 bytes; `blockHeight` stacks GOBs vertically and **`blockDepth` stacks slices**, so 3D Z is interleaved. Addressing follows the `tegra_swizzle` reference (Ryujinx / Tegra TRM) and `Swizzle`/`Deswizzle` are exact inverses |
 | `textureLayout` | Low 3 bits = `blockHeightLog2`; **bits 4..6 = `blockDepthLog2`** (0 for 2D, 4 = block depth 16 for every 3D record) |
-| Recovery pitches | A few large-dimension ASTC records store a **wider row pitch** than the formula predicts. The pitch is recovered from the stored `imageSize` and **must be fed to the swizzle**, otherwise padding leaks into the image (47 records) |
-| Cube faces | Each face is aligned to 4096 **only when it exceeds one page**; an 8x8 BC3s face is stored densely at 512 bytes (`6*512`, not `6*4096`) |
+| Wide-pitch chain | `em305c` #2 (ASTC 5×5 2050x2050, 11 mips) decomposes exactly: pitches `[7168,4096,2048,832,448,256,128,64,64,64,64]`, total 4596736. The pitch must be fed to the swizzle or the magenta padding leaks in (3072 → 6 pixels, 2752 → 78,594). The 47 single-mip cases are the same mechanism; the stored-size back-solve is now only a fallback and no longer fires |
+| Cube faces | A face is `align4096`-ed **only when its base mip surface reaches 4096 bytes**, never when the whole chain merely exceeds a page: 8x8 BC3s → 512/face (dense), BC1 64x64/7 → 5120/face (dense, total 30720), BC3 64x64/7 → 8192/face (total 49152) |
 | Formats | `0x01` (`"af"`) is a single uncompressed 8-bit channel at 1 byte/px (not compressed — corrected, see below); `0x6D` is uncompressed 32 bpp (decode-only, channel order unconfirmed) |
 | Hash | `crc32(name) & 0x7FFFFFFF`, masked, never auto-overwritten |
 
@@ -108,7 +108,7 @@ These were re-derived from `D:\Bayonetta3\romfs` and are locked by tests:
 ```
 src/Xt1.Core   net8.0, no UI: containers, XT1 model, swizzle, layout, codecs, NVTT/Oodle interop, writers, editing
 src/Xt1.App    net8.0-windows: WinForms shell, GDI+ 2D viewer, OpenGL cubemap/volume viewport, dialogs
-tests/Xt1.Core.Tests  257 tests, real-file validation against D:\Bayonetta3\romfs when present
+tests/Xt1.Core.Tests  393 tests, real-file validation against D:\Bayonetta3\romfs when present
 ```
 
 `Xt1.Core` is headless and fully testable; the app only consumes it.
@@ -158,8 +158,8 @@ tests/Xt1.Core.Tests  257 tests, real-file validation against D:\Bayonetta3\romf
     stored size. These describe the payload, so they are **not editable here**: to change the format
     or dimensions, import/replace the texture.
   - Validation verdict directly under it: green when the layout matches the stored size and the
-    texture decodes, red with the exact reason when it does not (the `imageSize` anomaly classes
-    above are reported here, using the same notes the layout produced).
+    texture decodes, red with the exact reason when it does not (a stored `imageSize` that the
+    layout cannot explain is reported here, using the same note the layout produced).
   - Hash: the `table3` hash as an editable hex field that accepts a paste with or without `0x`, and a
     **Calculate CRC32** button that asks for the name and writes `crc32(name) & 0x7FFFFFFF`.
   - Flags: the confirmed `table2` bits as named toggles — Model / UI bank entry, sRGB color space,
@@ -242,12 +242,16 @@ sRGB, and the real table comes from `XT1_FORMAT.md`.
   recompression is offered but disabled when probed as unsupported; saves then write raw payloads.
 - **3D editing** is view-only. Volumes decode correctly (depth-interleaved) and preview assembled in
   the 3D viewport, but re-encoding a volume is rejected rather than approximated.
-- `astcenc.exe` / `texconv.exe` paths are configurable but no CLI wrapper is wired; NVTT plus the
-  managed ASTC path cover ASTC/BC encoding.
+- Signed BC4/BC5 and BC6H encoding are NVTT-only: the managed path reports them as unsupported
+  instead of writing blocks with the wrong signedness, so without NVTT those formats are refused
+  rather than silently mis-encoded. Only the tool paths NVTT actually consumes are configurable
+  (`nvtt30205.dll`, `nvtt_export.exe`, the Oodle DLL).
 - Alpha / binary-alpha and the `0x2C` textureFlag semantics are still unknown; they are exposed as
   free-form editable fields and preserved verbatim rather than interpreted.
-- The two documented `imageSize` anomaly classes are surfaced as warnings with an override; the
-  base mip still previews correctly because the stored size is larger than the computed one.
+- No known unexplained layout mismatches remain: the former wide-pitch (multi-mip ASTC) and
+  tiny-cube classes are computed exactly, and the stored-size pitch back-solve no longer fires on
+  the known corpus. A record whose stored size still disagrees is surfaced as a warning with an
+  override, and the base mip still previews from the stored size.
 - Payloads shorter than the computed surface decode with zero-fill and a warning rather than
   throwing (malformed/truncated banks stay loadable).
 - `Xt1.App.exe --selfcheck` runs the headless integration check (native tools, codecs, golden

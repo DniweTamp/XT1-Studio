@@ -16,15 +16,6 @@ public static class ImageIo
         return FromImageSharp(image);
     }
 
-    public static RgbaImage LoadFromBytes(byte[] bytes, string? extension = null)
-    {
-        if (extension is not null && extension.Equals(".tga", StringComparison.OrdinalIgnoreCase))
-            return TgaIo.Read(bytes);
-
-        using var image = Image.Load<Rgba32>(bytes);
-        return FromImageSharp(image);
-    }
-
     public static void Save(RgbaImage image, string path)
     {
         var extension = Path.GetExtension(path).ToLowerInvariant();
@@ -50,14 +41,6 @@ public static class ImageIo
             default:
                 throw new NotSupportedException($"unsupported image extension '{extension}'");
         }
-    }
-
-    public static byte[] SaveToBytesPng(RgbaImage image)
-    {
-        using var sharp = ToImageSharp(image);
-        using var stream = new MemoryStream();
-        sharp.SaveAsPng(stream);
-        return stream.ToArray();
     }
 
     private static RgbaImage FromImageSharp(Image<Rgba32> image)

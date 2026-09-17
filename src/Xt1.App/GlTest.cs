@@ -1,4 +1,4 @@
-using System.Drawing.Imaging;
+﻿using System.Drawing.Imaging;
 using Xt1.App.Rendering;
 using Xt1.Core.Codecs;
 using Xt1.Core.Containers;
@@ -32,18 +32,18 @@ internal static class GlTest
             return 2;
         }
 
-        int? index = GetIntOption(args, "--index");
-        uint? hash = GetUIntOption(args, "--hash");
-        int? bankIndex = GetIntOption(args, "--bank");
-        int mip = GetIntOption(args, "--mip") ?? 0;
-        int size = GetIntOption(args, "--size") ?? 320;
-        string outputDirectory = GetOption(args, "--out") ?? Path.Combine(Path.GetTempPath(), "kilo", "gl");
-        var mode = ParseMode(GetOption(args, "--mode"));
-        var channel = ParseChannel(GetOption(args, "--channel"));
-        float? yaw = GetFloatOption(args, "--yaw");
-        float? pitch = GetFloatOption(args, "--pitch");
-        float? distance = GetFloatOption(args, "--distance");
-        float? density = GetFloatOption(args, "--density");
+        int? index = CliOptions.GetInt(args, "--index");
+        uint? hash = CliOptions.GetUInt(args, "--hash");
+        int? bankIndex = CliOptions.GetInt(args, "--bank");
+        int mip = CliOptions.GetInt(args, "--mip") ?? 0;
+        int size = CliOptions.GetInt(args, "--size") ?? 320;
+        string outputDirectory = CliOptions.Get(args, "--out") ?? Path.Combine(Path.GetTempPath(), "kilo", "gl");
+        var mode = ParseMode(CliOptions.Get(args, "--mode"));
+        var channel = ParseChannel(CliOptions.Get(args, "--channel"));
+        float? yaw = CliOptions.GetFloat(args, "--yaw");
+        float? pitch = CliOptions.GetFloat(args, "--pitch");
+        float? distance = CliOptions.GetFloat(args, "--distance");
+        float? density = CliOptions.GetFloat(args, "--density");
 
         var settings = AppSettings.Load();
         var document = BankDocument.Load(file, settings.Resolve().Oodle);
@@ -496,26 +496,4 @@ internal static class GlTest
         _ => ImageChannelMode.Rgba,
     };
 
-    private static string? GetOption(string[] args, string name)
-    {
-        int at = Array.IndexOf(args, name);
-        return at >= 0 && at + 1 < args.Length ? args[at + 1] : null;
-    }
-
-    private static int? GetIntOption(string[] args, string name) =>
-        int.TryParse(GetOption(args, name), out int parsed) ? parsed : null;
-
-    private static float? GetFloatOption(string[] args, string name) =>
-        float.TryParse(GetOption(args, name), System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out float parsed)
-            ? parsed
-            : null;
-
-    private static uint? GetUIntOption(string[] args, string name)
-    {
-        var value = GetOption(args, name);
-        if (value is null) return null;
-        var text = value.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? value[2..] : value;
-        return uint.TryParse(text, System.Globalization.NumberStyles.HexNumber, null, out uint parsed) ? parsed : null;
-    }
 }

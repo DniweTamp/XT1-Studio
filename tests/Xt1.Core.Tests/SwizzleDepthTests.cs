@@ -116,11 +116,11 @@ public class SwizzleDepthTests
     }
 
     /// <summary>
-    /// ui_core.dat's "core.wta" #1 (1026x1026 ASTC 6x6, hash 0x482960F9) stores a pitch of 48 GOBs
-    /// where the formula gives 43. Back-solving the pitch from the stored imageSize recovers it.
+    /// ui_core.dat's "core.wta" #1 (1026x1026 ASTC 6x6, hash 0x482960F9) uses Tegra
+    /// tile_width_spacing = 4: the formula's 43-GOB row is widened to 48 GOBs (3072 bytes).
     /// </summary>
     [Fact]
-    public void AstcLargeOddDimension_RecoversPitchFromStoredSize()
+    public void AstcLargeOddDimension_UsesTheWidePitch()
     {
         if (!TestPaths.Exists(TestPaths.UiCoreDat)) return;
 
@@ -129,9 +129,11 @@ public class SwizzleDepthTests
         Assert.NotNull(texture);
 
         var layout = texture!.Layout;
-        Assert.True(layout.PitchRecoveredFromStoredSize);
+        Assert.True(layout.WidePitchApplied);
+        Assert.False(layout.PitchRecoveredFromStoredSize);
         Assert.True(layout.SizeMatches, layout.Note);
         Assert.Equal(589824UL, texture.Header.ImageSize);
+        Assert.Equal(589824L, layout.ComputedImageSize);
         Assert.Equal(3072, layout.Mips[0].Pitch);   // 48 GOBs, not the formula's 2752 (43)
         Assert.Equal(171, layout.Mips[0].WidthBlocks);
 
@@ -140,22 +142,24 @@ public class SwizzleDepthTests
         Assert.Null(error);
         Assert.Equal(1026, image!.Width);
         Assert.Equal(1026, image.Height);
+        Assert.True(MeanHorizontalDelta(image!) > 1.5, "decoded image looks blank");
     }
 
     /// <summary>
-    /// The recovered pitch must actually be used by the swizzle, not just by the size maths. The
+    /// The wide pitch must actually be used by the swizzle, not just by the size maths. The
     /// surface's padding is filled with magenta (255,0,255) in these atlases, so a wrong stride
-    /// drags padding into the image: decoding with the formula's pitch leaks ~79k magenta pixels,
-    /// with the recovered pitch ~0.
+    /// drags padding into the image: decoding with the 2752-byte formula pitch leaks ~79k magenta
+    /// pixels, with the wide 3072-byte pitch ~0.
     /// </summary>
     [Fact]
-    public void RecoveredPitch_IsUsedByTheSwizzle_SoPaddingDoesNotLeak()
+    public void WidePitch_IsUsedByTheSwizzle_SoPaddingDoesNotLeak()
     {
         if (!TestPaths.Exists(TestPaths.UiCoreDat)) return;
 
         var document = BankDocument.Load(TestPaths.UiCoreDat);
         var texture = document.AllTextures.FirstOrDefault(t => t.Header.Width == 1026 && t.Header.Height == 1026);
         Assert.NotNull(texture);
+        Assert.True(texture!.Layout.WidePitchApplied);
 
         var image = TextureCodec.Decode(texture!, 0, 0, 0, out var error);
         Assert.NotNull(image);
@@ -169,7 +173,7 @@ public class SwizzleDepthTests
 
         Assert.True(magenta < 500,
             $"{magenta} magenta padding pixels leaked into the decode; the swizzle ignored the " +
-            "recovered pitch (expected fewer than 500)");
+            "wide pitch (expected fewer than 500)");
 
         // ... and the image must not be blank, which would also satisfy the check above.
         Assert.True(MeanHorizontalDelta(image) > 1.5, "decoded image looks blank");
@@ -219,16 +223,40 @@ public class SwizzleDepthTests
     }
 
     [Fact]
-    public void MultiMipAnomaly_IsStillFlaggedRatherThanGuessed()
+    public void MultiMipAnomaly_IsExplainedByWidePitch()
     {
-        // The pitch recovery only applies when the surface is a single mip; anything else stays
-        // flagged so a wrong pitch is never silently invented.
+        // pl0080.dat: ASTC 6x6 1024x1024 / 10 mips. The earlier implementation could only
+        // back-solve a single mip, so this multi-mip chain stayed flagged; tile_width_spacing = 4
+        // now computes it exactly.
         var result = SurfaceLayout.Compute(
             1024, 1024, 1, 10, TextureType.T2D, 0x403,
             FormatTable.Get(Xt1Format.Astc6x6Unorm), storedImageSize: 915456);
 
-        Assert.False(result.SizeMatches);
+        Assert.True(result.SizeMatches, result.Note);
+        Assert.Equal(915456, result.ComputedImageSize);
+        Assert.True(result.WidePitchApplied);
         Assert.False(result.PitchRecoveredFromStoredSize);
-        Assert.NotNull(result.Note);
+    }
+
+    /// <summary>
+    /// em305c.dat #2: ASTC 5x5 2050x2050, 11 mips, layout 0x403. This is the exact chain the
+    /// wide-pitch rule must reproduce, including the later mips that stay "small".
+    /// </summary>
+    [Fact]
+    public void WidePitch_ElevenMipChain_MatchesEm305c()
+    {
+        var result = SurfaceLayout.Compute(
+            2050, 2050, 1, 11, TextureType.T2D, 0x403,
+            FormatTable.Get(Xt1Format.Astc5x5Unorm), storedImageSize: 4596736);
+
+        Assert.True(result.SizeMatches, result.Note);
+        Assert.True(result.WidePitchApplied);
+        Assert.Equal(new[] { 7168, 4096, 2048, 832, 448, 256, 128, 64, 64, 64, 64 },
+            result.Mips.Select(m => m.Pitch).ToArray());
+        Assert.Equal(new long[] { 3211264, 1048576, 262144, 53248, 14336, 4096, 1024, 512, 512, 512, 512 },
+            result.Mips.Select(m => (long)m.SliceSurfaceSize).ToArray());
+        Assert.Equal(new long[] { 0, 3211264, 4259840, 4521984, 4575232, 4589568, 4593664, 4594688, 4595200, 4595712, 4596224 },
+            result.Mips.Select(m => m.Offset).ToArray());
+        Assert.Equal(4596736L, result.ComputedImageSize);
     }
 }

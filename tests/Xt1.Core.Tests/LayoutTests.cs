@@ -76,14 +76,16 @@ public class LayoutTests
     }
 
     [Fact]
-    public void AstcLargestDimAnomaly_IsFlaggedNotThrown()
+    public void AstcLargestDimAnomaly_IsExplainedByWidePitch()
     {
-        // pl0080.dat: ASTC 6x6 1024x1024 / 10 mips stores 915456 while the formula gives 772096.
+        // pl0080.dat: ASTC 6x6 1024x1024 / 10 mips stores 915456. This is the multi-mip form of
+        // Tegra tile_width_spacing = 4 (section 6): every non-small mip gets a 1024-byte row pitch.
         var result = Compute(0x8b, 1024, 1024, 1, 10, TextureType.T2D, 0x403, stored: 915456);
         Assert.True(result.Applicable);
-        Assert.Equal(772096, result.ComputedImageSize);
-        Assert.False(result.SizeMatches);
-        Assert.NotNull(result.Note);
+        Assert.Equal(915456, result.ComputedImageSize);
+        Assert.True(result.SizeMatches, result.Note);
+        Assert.True(result.WidePitchApplied);
+        Assert.False(result.PitchRecoveredFromStoredSize);
     }
 
     [Fact]
@@ -147,5 +149,140 @@ public class LayoutTests
         Assert.Equal(3, header.BlockHeightLog2);
         header.Layout = 0x304;
         Assert.Equal(4, header.BlockHeightLog2);
+    }
+
+    /// <summary>
+    /// Tegra tile_width_spacing = 4 (the former "multi-mip ASTC anomaly"): a record whose
+    /// blockHeightLog2 is 3 and whose base-mip row is not 1024-aligned widens every non-small
+    /// mip's row pitch to 1024 bytes. Each expected value is a real stored imageSize.
+    /// </summary>
+    [Theory]
+    [InlineData(0x8Bu, 1024u, 1024u, 10, 915456L)]
+    [InlineData(0x7Bu, 1025u, 1025u, 10, 1385472L)]
+    [InlineData(0x7Du, 2052u, 2052u, 4, 3256320L)]
+    [InlineData(0x7Du, 2052u, 2052u, 8, 3273216L)]
+    [InlineData(0x84u, 8192u, 4096u, 13, 8468992L)]
+    public void WidePitch_IsComputedExactly(uint fmt, uint w, uint h, int mips, long expected)
+    {
+        var result = Compute(fmt, w, h, 1, mips, TextureType.T2D, 0x403, stored: (ulong)expected);
+        Assert.True(result.SizeMatches, result.Note);
+        Assert.True(result.WidePitchApplied);
+        Assert.Equal(expected, result.ComputedImageSize);
+    }
+
+    [Fact]
+    public void WidePitch_DoesNotFireWhenBlockHeightLog2IsNotThree()
+    {
+        // layout 0x4 -> blockHeightLog2 4: the trigger must not fire even though the base row
+        // (171 blocks * 16 = 2736) is not 1024-aligned.
+        var result = Compute(0x7d, 1026, 2052, 1, 1, TextureType.T2D, 0x4);
+        Assert.False(result.WidePitchApplied);
+        Assert.Equal(2752, result.Mips[0].Pitch);
+    }
+
+    [Fact]
+    public void WidePitch_DoesNotFireWhenTheBaseRowIsAlready1024Aligned()
+    {
+        // ASTC 8x8 1024x1024 with blockHeightLog2 3 has a 128 * 16 = 2048-byte base row, already a
+        // 16-GOB multiple, so the plain 64-byte pitch is used.
+        var result = Compute(0x80, 1024, 1024, 1, 4, TextureType.T2D, 0x403);
+        Assert.False(result.WidePitchApplied);
+        Assert.Equal(2048, result.Mips[0].Pitch);
+    }
+
+    [Fact]
+    public void WidePitch_LeavesGobHighMipsSmall()
+    {
+        // ASTC 5x5: height 640 makes mip 1 exactly 320 px = 64 blocks, which the isSmall gate keeps
+        // at the natural pitch; height 650 makes it 65 blocks, which the gate widens.
+        var atBoundary = Compute(0x7b, 325, 640, 1, 2, TextureType.T2D, 0x403);
+        Assert.True(atBoundary.WidePitchApplied);
+        Assert.Equal(64, atBoundary.Mips[1].HeightBlocks);
+        Assert.Equal(576, atBoundary.Mips[1].Pitch);   // align(33 * 16, 64), not 1024
+        Assert.Equal(2048, atBoundary.Mips[0].Pitch);
+
+        var aboveBoundary = Compute(0x7b, 325, 650, 1, 2, TextureType.T2D, 0x403);
+        Assert.True(aboveBoundary.WidePitchApplied);
+        Assert.Equal(65, aboveBoundary.Mips[1].HeightBlocks);
+        Assert.Equal(1024, aboveBoundary.Mips[1].Pitch); // align(33 * 16, 1024)
+    }
+
+    [Fact]
+    public void CubeFaces_AreDenseBelowOnePageAndPageAlignedWhenTheBaseMipReachesOnePage()
+    {
+        // BC1 64x64/7 has a 5120-byte chain but a 2048-byte base mip, so its faces are dense.
+        var bc1 = Compute(0x46, 64, 64, 1, 7, TextureType.TCubeArray, 0, stored: 30720);
+        Assert.True(bc1.SizeMatches, bc1.Note);
+        Assert.Equal(5120, bc1.FaceStride);
+        Assert.Equal(0, bc1.FaceAlignment);
+        Assert.Equal(30720, bc1.ComputedImageSize);
+
+        // BC3 64x64/7 has a 4096-byte base mip, so its 7680-byte chain is page-aligned.
+        var bc3 = Compute(0x48, 64, 64, 1, 7, TextureType.TCubeArray, 0, stored: 49152);
+        Assert.True(bc3.SizeMatches, bc3.Note);
+        Assert.Equal(8192, bc3.FaceStride);
+        Assert.Equal(4096, bc3.FaceAlignment);
+        Assert.Equal(49152, bc3.ComputedImageSize);
+
+        var tiny = Compute(0x48, 8, 8, 1, 1, TextureType.TCubeArray, 0, stored: 3072);
+        Assert.True(tiny.SizeMatches, tiny.Note);
+        Assert.Equal(512, tiny.FaceStride);
+        Assert.Equal(0, tiny.FaceAlignment);
+
+        // A 4096-byte base mip is exactly one page, so the 4096-byte face is aligned in place.
+        var page = Compute(0x48, 64, 64, 1, 1, TextureType.TCubeArray, 0, stored: 24576);
+        Assert.True(page.SizeMatches, page.Note);
+        Assert.Equal(4096, page.FaceStride);
+        Assert.Equal(4096, page.FaceAlignment);
+        Assert.Equal(24576, page.ComputedImageSize);
+    }
+
+    [Fact]
+    public void WidePitch_IsNotAppliedWhenEveryMipIsSmall()
+    {
+        // The record-level trigger fires (ASTC 5x5, blockHeightLog2 3, base row 62 * 16 = 992 is not
+        // 1024-aligned) but the only mip is "small": heightBlocks 64 <= 1 << (3 + 3), so the widened
+        // pitch is never selected. WidePitchApplied must report the applied pitch, not the trigger.
+        var result = Compute(0x7b, 310, 320, 1, 1, TextureType.T2D, 0x403, stored: 65536);
+
+        Assert.True(result.Applicable);
+        Assert.True(result.SizeMatches, result.Note);
+        Assert.False(result.WidePitchApplied);
+        Assert.Equal(64, result.Mips[0].HeightBlocks);
+        Assert.Equal(1024, result.Mips[0].Pitch); // align(992, 64); the widened pitch is also 1024 here
+        Assert.Equal(65536, result.ComputedImageSize);
+    }
+
+    [Fact]
+    public void BackSolvedPitch_DoesNotReportWidePitchApplied()
+    {
+        // ASTC 6x6 1026x1026, single mip, layout 0x403 (blockHeightLog2 3). The widened-pitch model
+        // computes 589824; feeding the plain-pitch size (2752 * 192) instead forces the stored-size
+        // back-solve, which must not report WidePitchApplied because it never selects the widened
+        // pitch.
+        var result = Compute(0x8b, 1026, 1026, 1, 1, TextureType.T2D, 0x403, stored: 528384);
+
+        Assert.True(result.Applicable);
+        Assert.True(result.PitchRecoveredFromStoredSize, result.Note);
+        Assert.False(result.WidePitchApplied);
+        Assert.True(result.SizeMatches, result.Note);
+        Assert.Equal(2752, result.Mips[0].Pitch);
+        Assert.Equal(528384, result.ComputedImageSize);
+    }
+
+    [Theory]
+    [InlineData(1UL << 31)]
+    [InlineData(1UL << 33)]
+    public void HugeStoredImageSize_OnATinyRecord_IsRejectedWithoutANegativeSurface(ulong stored)
+    {
+        // A crafted imageSize must not back-solve a pitch whose per-mip surface product overflows a
+        // signed int: the recovery gate refuses it and the layout keeps a sane, non-negative surface.
+        var result = Compute(0x8b, 1, 1, 1, 1, TextureType.T2D, 0x403, stored: stored);
+
+        Assert.True(result.Applicable);
+        Assert.False(result.PitchRecoveredFromStoredSize);
+        Assert.False(result.SizeMatches);
+        Assert.All(result.Mips, m => Assert.True(m.SliceSurfaceSize >= 0));
+        Assert.Equal(2048, result.Mips[0].SliceSurfaceSize);
     }
 }

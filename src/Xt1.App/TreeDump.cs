@@ -40,7 +40,8 @@ internal static class TreeDump
     private sealed record Inspection(
         string Path, BankKind Kind, int Banks, int Textures, int Supported, int Decoded, int Failed,
         string? Error, List<string>? UnsupportedFormats = null,
-        int LayoutMismatches = 0, int PitchRecovered = 0, List<string>? MismatchExamples = null,
+        int LayoutMismatches = 0, int PitchRecovered = 0, int WidePitch = 0,
+        List<string>? MismatchExamples = null,
         long MagentaPixels = 0, List<string>? MagentaExamples = null);
 
     private static Inspection Inspect(string path, string? oodlePath, Action<string>? log, bool printTree)
@@ -71,7 +72,7 @@ internal static class TreeDump
             }
 
             int total = 0, supported = 0, decoded = 0, failed = 0;
-            int layoutMismatches = 0, pitchRecovered = 0;
+            int layoutMismatches = 0, pitchRecovered = 0, widePitch = 0;
             long magenta = 0;
             var unsupportedFormats = new List<string>();
             var mismatchExamples = new List<string>();
@@ -82,6 +83,7 @@ internal static class TreeDump
                 var layout = texture.Layout;
                 if (layout.Applicable)
                 {
+                    if (layout.WidePitchApplied) widePitch++;
                     if (layout.PitchRecoveredFromStoredSize) pitchRecovered++;
                     else if (!layout.SizeMatches)
                     {
@@ -114,7 +116,7 @@ internal static class TreeDump
 
                     // Only a record whose geometry disagreed with the formula can leak padding, so
                     // magenta is only counted there (elsewhere it is ordinary texture content).
-                    if (layout.PitchRecoveredFromStoredSize || !layout.SizeMatches)
+                    if (layout.PitchRecoveredFromStoredSize || layout.WidePitchApplied || !layout.SizeMatches)
                     {
                         long count = 0;
                         var pixels = image.Pixels;
@@ -133,11 +135,12 @@ internal static class TreeDump
 
             if (printTree)
                 log!($"  decode: {supported}/{total} supported, {failed} failed" +
+                     (widePitch > 0 ? $", {widePitch} wide-pitch record(s)" : string.Empty) +
                      (pitchRecovered > 0 ? $", {pitchRecovered} pitch(es) recovered from imageSize" : string.Empty) +
                      (layoutMismatches > 0 ? $", {layoutMismatches} layout mismatch(es)" : string.Empty));
 
             return new Inspection(path, document.Kind, document.Sections.Count, total, supported, decoded,
-                failed, null, unsupportedFormats, layoutMismatches, pitchRecovered, mismatchExamples,
+                failed, null, unsupportedFormats, layoutMismatches, pitchRecovered, widePitch, mismatchExamples,
                 magenta, magentaExamples);
         }
         catch (Exception ex)
@@ -182,7 +185,7 @@ internal static class TreeDump
         log("");
 
         int ok = 0, failedFiles = 0, skipped = 0, textures = 0, decoded = 0, failedTextures = 0;
-        int layoutMismatches = 0, pitchRecovered = 0;
+        int layoutMismatches = 0, pitchRecovered = 0, widePitch = 0;
         long magenta = 0;
         var byKind = new SortedDictionary<string, int>(StringComparer.Ordinal);
         var unsupported = new SortedDictionary<string, int>(StringComparer.Ordinal);
@@ -204,6 +207,7 @@ internal static class TreeDump
             failedTextures += result.Failed;
             layoutMismatches += result.LayoutMismatches;
             pitchRecovered += result.PitchRecovered;
+            widePitch += result.WidePitch;
             if (result.MismatchExamples is not null) mismatchExamples.AddRange(result.MismatchExamples);
             magenta += result.MagentaPixels;
             if (result.MagentaExamples is not null) magentaExamples.AddRange(result.MagentaExamples);
@@ -224,7 +228,7 @@ internal static class TreeDump
         log("");
         log($"files: {files.Count}  ok {ok}  failed {failedFiles}  skipped {skipped} (not texture banks)");
         log($"textures decoded: {decoded}/{textures}  ({failedTextures} failed)");
-        log($"layouts: {pitchRecovered} pitch(es) recovered from imageSize, {layoutMismatches} unexplained mismatch(es)");
+        log($"layouts: {widePitch} wide-pitch record(s), {pitchRecovered} pitch(es) recovered from imageSize, {layoutMismatches} unexplained mismatch(es)");
         log($"padding magenta leaked by anomalous/recovered records: {magenta} pixel(s) in {magentaExamples.Count} record(s)");
         foreach (var entry in byKind)
             log($"  {entry.Key}: {entry.Value}");

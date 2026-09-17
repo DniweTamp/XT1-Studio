@@ -26,18 +26,10 @@ public class RealFileTests
         Assert.True(h.Height >= 1);
     }
 
-    private static bool IsKnownSizeAnomaly(EditableTexture tex, LayoutResult layout)
-    {
-        if (layout.SizeMatches) return true;
-        var info = tex.FormatInfo!;
-        // ASTC at very large, non-power-of-two dimensions (e.g. 1024+ / 2050) with layout 0x403.
-        if (info.Codec == CodecKind.Astc && layout.ComputedImageSize < (long)tex.Header.ImageSize)
-            return true;
-        // Tiny cube faces stored smaller than the 4096 face alignment.
-        if (tex.Header.Type.IsCube() && layout.ComputedImageSize > (long)tex.Header.ImageSize)
-            return true;
-        return false;
-    }
+    private static bool IsLayoutExplained(LayoutResult layout) =>
+        // The wide-pitch and tiny-cube rules are exact, so every applicable record must now match
+        // its stored imageSize; a recovered single-mip pitch also counts as explained.
+        layout.SizeMatches || layout.PitchRecoveredFromStoredSize;
 
     [Fact]
     public void LoosePlDat_AllRecordsSatisfyInvariants()
@@ -59,8 +51,8 @@ public class RealFileTests
                     AssertInvariants(tex);
                     var layout = tex.Layout;
                     if (layout.Applicable)
-                        Assert.True(IsKnownSizeAnomaly(tex, layout),
-                            $"{Path.GetFileName(path)}: unexpected imageSize mismatch ({layout.Note})");
+                        Assert.True(IsLayoutExplained(layout),
+                            $"{Path.GetFileName(path)}: unexplained imageSize mismatch ({layout.Note})");
                     records++;
                 }
             }
@@ -70,7 +62,7 @@ public class RealFileTests
     }
 
     [Fact]
-    public void Pl0080_Astc6x6Anomaly_LoadsAndStillDecodesBaseMip()
+    public void Pl0080_Astc6x6WidePitch_LoadsAndStillDecodesBaseMip()
     {
         if (!TestPaths.Exists(TestPaths.Pl0080Dat)) return;
         var document = BankDocument.Load(TestPaths.Pl0080Dat);
@@ -79,7 +71,7 @@ public class RealFileTests
 
         var anomalous = section.Bank.Textures.Where(t => t.FormatInfo?.AstcFootprintIndex == 4).ToList();
         Assert.NotEmpty(anomalous);
-        Assert.Contains(anomalous, t => !t.Layout.SizeMatches);
+        Assert.All(anomalous, t => Assert.True(t.Layout.SizeMatches, t.Layout.Note));
 
         var image = TextureCodec.Decode(anomalous[0], 0, 0, 0, out var error);
         Assert.NotNull(image);

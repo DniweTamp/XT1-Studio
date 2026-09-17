@@ -1,3 +1,4 @@
+using System.Numerics;
 using Xt1.Core.Format;
 using Xt1.Core.Util;
 
@@ -70,21 +71,15 @@ public sealed class LayoutResult
     /// </summary>
     public bool PitchRecoveredFromStoredSize { get; init; }
 
-    public long MipOffset(int mip) => mip >= 0 && mip < Mips.Count ? Mips[mip].Offset : 0;
-
     /// <summary>
-    /// Offset of a 3D slice. Meaningful only when <see cref="MipInfo.BlockDepth"/> is 1; when the
-    /// block depth interleaves Z the slices are not individually contiguous, so the whole volume
-    /// must be untiled at once (see <see cref="GobSwizzle.DeswizzleVolume"/>).
+    /// True when the record uses Tegra <c>tile_width_spacing = 4</c> (the ASTC multi-mip anomaly) and
+    /// at least one mip actually took the widened row pitch: each mip that is not "small" gets its row
+    /// pitch widened to a 1024-byte (16-GOB) boundary, while small mips keep the plain 64-byte pitch.
+    /// False when the record-level trigger fires but every mip is small (widening is a no-op), and
+    /// also false when the pitch came from the stored-size back-solve, since no mip then takes the
+    /// widened pitch.
     /// </summary>
-    public long SliceOffset(int mip, int slice)
-    {
-        if (mip < 0 || mip >= Mips.Count) return 0;
-        var info = Mips[mip];
-        if (slice < 0 || slice >= info.SliceCount) return info.Offset;
-        if (info.BlockDepth > 1) return info.Offset;
-        return info.Offset + (long)slice * info.SliceSurfaceSize;
-    }
+    public bool WidePitchApplied { get; init; }
 
     public long FaceOffset(int face)
     {
@@ -102,6 +97,12 @@ public static class SurfaceLayout
 {
     private const int MipAlignment = 512;
     private const int CubeFaceAlignment = 4096;
+
+    /// <summary>Largest texture edge any real bank uses (the widest observed is 2050).</summary>
+    private const uint MaxDimension = 16384;
+
+    /// <summary>Texel budget for mip 0, so a crafted header cannot size arrays in the gigabytes.</summary>
+    private const long MaxMipTexels = 64L * 1024 * 1024;
 
     public static LayoutResult Compute(Xt1Header header)
     {
@@ -132,8 +133,32 @@ public static class SurfaceLayout
         var fmt = format;
         int mips = Math.Clamp(mipCount <= 0 ? 1 : mipCount, 1, 32);
         int blkLog2 = (int)(layout & 7);
+        int bppLog2 = BitOperations.Log2((uint)fmt.BytesPerBlock);
         bool is3D = type.Is3D();
         int baseDepth = (int)Math.Max(1u, depth);
+
+        // Plausibility limits. A 56-byte header can advertise dimensions whose derived block counts
+        // would allocate gigabytes and spin the swizzle loops for minutes, so implausible geometry is
+        // refused the same way an unknown format is: no layout, and every decoder bails out with this
+        // note instead. Real textures top out around 2K on a side.
+        ulong w0 = Math.Max(1u, width);
+        ulong h0 = Math.Max(1u, height);
+        ulong d0 = is3D ? (ulong)baseDepth : 1;
+        if (w0 > MaxDimension || h0 > MaxDimension || d0 > MaxDimension ||
+            w0 * h0 * d0 > (ulong)MaxMipTexels)
+        {
+            return new LayoutResult
+            {
+                Type = type,
+                Format = fmt,
+                Applicable = false,
+                ComputedImageSize = 0,
+                StoredImageSize = storedImageSize,
+                SizeMatches = false,
+                FaceCount = type.FaceCount(),
+                Note = $"implausible dimensions {width}x{height}x{depth}; layout not computed",
+            };
+        }
 
         // Bits 4..6 of the layout hold blockDepthLog2; when zero, fall back to the driver's depth
         // heuristic (they agree for every 3D surface observed in the game).
@@ -142,16 +167,23 @@ public static class SurfaceLayout
             ? blockDepthLog2 > 0 ? 1 << blockDepthLog2 : GobSwizzle.BlockDepth(baseDepth)
             : 1;
 
-        var mipList = BuildMips(null, out long cursor, out long faceSize);
+        // Whether the driver used tile_width_spacing = 4 is a record-level property (a texture cannot
+        // vary it per mip), so decide it once from the base mip: blockHeightLog2 == 3 and a base row
+        // that is not already 1024-aligned. Validated at 100% over the full census with zero false
+        // positives/negatives; the format guard is redundant on the corpus, so the trigger is exact.
+        bool widePitch = blkLog2 == 3
+            && (Mem.DivUp((int)Math.Max(1u, width), fmt.BlockWidth) * fmt.BytesPerBlock) % 1024 != 0;
+
+        var mipList = BuildMips(null, out long cursor, out long faceSize, out bool anyWide);
         int faceCount = type.FaceCount();
 
-        // Cube faces are normally separated by 4096-byte alignment, but a face that already fits
-        // inside one page is stored densely (8x8 BC3s faces occupy 512 bytes, and the record's
-        // imageSize is 6*512 rather than 6*4096). Verified against all four cube groups observed:
-        // 512 -> 512, 7680 -> 8192, 23552 -> 24576, 89600 -> 90112.
-        long faceStride = faceSize <= CubeFaceAlignment
-            ? faceSize
-            : Mem.Align(faceSize, CubeFaceAlignment);
+        // Cube faces are page-aligned only when the base mip itself reaches a page: a chain whose
+        // mip 0 (the largest mip's single slice) is under 4096 bytes is stored densely. This keeps
+        // 512 -> 512, 4096 -> 4096, 7680 -> 8192, 65536 -> 65536 and 89600 -> 90112 unchanged while
+        // fixing the 13 BC1_SRGB 64x64 7-mip cubes (face 5120, base mip 2048 -> dense 5120 = 30720).
+        long baseMipSurface = mipList.Count > 0 ? mipList[0].SliceSurfaceSize : 0;
+        bool cubePageAlign = type.IsCube() && baseMipSurface >= CubeFaceAlignment;
+        long faceStride = cubePageAlign ? Mem.Align(faceSize, CubeFaceAlignment) : faceSize;
         long computed = type.IsCube()
             ? (long)faceCount * faceStride
             : cursor;
@@ -165,15 +197,18 @@ public static class SurfaceLayout
         if (computed != (long)storedImageSize && mips == 1 && !type.IsCube() && mipList.Count == 1)
         {
             var mip = mipList[0];
-            long units = (long)Mem.Align(mip.HeightBlocks, mip.Lines) * mip.SliceCount;
+            // Padded rows per slice, kept in a long so the pitch bound below cannot itself overflow
+            // and so the recovered pitch is refused before it could wrap the per-mip surface product.
+            long paddedRows = Mem.Align(mip.HeightBlocks, mip.Lines);
+            long units = paddedRows * mip.SliceCount;
             int needed = mip.WidthBlocks * fmt.BytesPerBlock;
             if (units > 0 && storedImageSize % (ulong)units == 0)
             {
                 long candidate = (long)(storedImageSize / (ulong)units);
                 if (candidate != mip.Pitch && candidate >= needed && candidate % 64 == 0 &&
-                    candidate <= int.MaxValue)
+                    candidate <= int.MaxValue / Math.Max(1L, paddedRows))
                 {
-                    mipList = BuildMips((int)candidate, out cursor, out _);
+                    mipList = BuildMips((int)candidate, out cursor, out _, out anyWide);
                     computed = cursor;
                     pitchRecovered = computed == (long)storedImageSize;
                 }
@@ -206,17 +241,19 @@ public static class SurfaceLayout
             FaceCount = faceCount,
             FaceSize = faceSize,
             FaceStride = faceStride,
-            FaceAlignment = type.IsCube() && faceSize > CubeFaceAlignment ? CubeFaceAlignment : 0,
+            FaceAlignment = cubePageAlign ? CubeFaceAlignment : 0,
             Note = note,
             PitchRecoveredFromStoredSize = pitchRecovered,
+            WidePitchApplied = anyWide,
         };
 
         // The mip chain, optionally forcing a row pitch (used by the recovery above).
-        List<MipInfo> BuildMips(int? pitchOverride, out long cursorOut, out long faceSizeOut)
+        List<MipInfo> BuildMips(int? pitchOverride, out long cursorOut, out long faceSizeOut, out bool wideOut)
         {
             int lpbh = 8 << blkLog2;
             int shift = 0;
             long cursor = 0;
+            bool anyWideApplied = false;
             var list = new List<MipInfo>(mips);
 
             for (int m = 0; m < mips; m++)
@@ -232,8 +269,27 @@ public static class SurfaceLayout
                     shift++;
 
                 int lines = 8 * Math.Max(1, (1 << blkLog2) >> shift);
-                int pitch = pitchOverride ?? Mem.Align(wb * fmt.BytesPerBlock, 64);
-                int surface = pitch * Mem.Align(hb, lines);
+
+                // yuzu's IsSmallerThanGobSize gate: the width term is in bytes, the height term in
+                // rows and the depth term (3D only) in slices. A record with tile_width_spacing = 4
+                // rounds every non-small mip's row up to 16 GOBs (1024 bytes); small mips (and every
+                // record without the trigger) keep the plain 64-byte rounded pitch.
+                int widthBytes = wb * fmt.BytesPerBlock;
+                bool isSmall = (long)widthBytes <= (1L << (6 - bppLog2 + 4))
+                            || hb <= (1 << (3 + blkLog2))
+                            || (is3D && d < (1 << blockDepthLog2));
+                // The widened pitch only counts as applied when it is the pitch actually selected;
+                // a pitchOverride (the stored-size back-solve) supplies the pitch instead.
+                bool usedWide = widePitch && !isSmall;
+                anyWideApplied |= usedWide && pitchOverride is null;
+                int pitch = pitchOverride
+                    ?? (usedWide
+                        ? Mem.Align(widthBytes, 1024)
+                        : Mem.Align(widthBytes, 64));
+                long surfaceLong = (long)pitch * Mem.Align(hb, lines);
+                // pitch is bounded by the recovery gate above, so this clamp never triggers for a
+                // valid record; it only stops a crafted pitch from wrapping the surface negative.
+                int surface = (int)Math.Min(surfaceLong, int.MaxValue);
                 long offset = Mem.Align(cursor, MipAlignment);
 
                 list.Add(new MipInfo
@@ -258,10 +314,9 @@ public static class SurfaceLayout
 
             cursorOut = cursor;
             faceSizeOut = cursor;
+            wideOut = anyWideApplied;
             return list;
         }
     }
 
-    /// <summary>Compute the stored payload size for a header without a full parse.</summary>
-    public static long ComputeImageSize(Xt1Header header) => Compute(header).ComputedImageSize;
 }

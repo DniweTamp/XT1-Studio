@@ -17,6 +17,13 @@ public sealed class WtbBank
     public const int HeaderSize = 0x20;
     public const int Xt1RecordSize = Xt1Header.Size;
 
+    /// <summary>
+    /// Total payload bytes one bank may materialize while parsing. Real banks hold tens of MB; the
+    /// cap exists so a crafted count x size combination cannot allocate gigabytes from a small file,
+    /// which the per-texture clamp alone does not prevent.
+    /// </summary>
+    private const long MaxTotalPayloadBytes = 512L * 1024 * 1024;
+
     private readonly List<EditableTexture> _textures = new();
     private readonly int _originalCount;
     private readonly uint _originalT0, _originalT1, _originalT2, _originalT3, _originalXt1;
@@ -151,6 +158,7 @@ public sealed class WtbBank
         };
         bank._originalVersion = version;
 
+        long totalPayload = 0;
         for (int i = 0; i < count; i++)
         {
             int headerAt = checked((int)xt1 + i * Xt1RecordSize);
@@ -181,6 +189,12 @@ public sealed class WtbBank
                 {
                     long max = stream.Length - rel;
                     if (size < 0 || size > max) size = max;
+
+                    totalPayload += size;
+                    if (totalPayload > MaxTotalPayloadBytes)
+                        throw new InvalidDataException(
+                            $"WTB payloads exceed {MaxTotalPayloadBytes / (1024 * 1024)} MB");
+
                     payload = stream.AsSpan((int)rel, (int)size).ToArray();
                 }
             }
