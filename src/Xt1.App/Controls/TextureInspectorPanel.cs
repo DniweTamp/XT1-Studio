@@ -123,8 +123,8 @@ public sealed class TextureInspectorPanel : UserControl
 
         // --- Hash ------------------------------------------------------------------------
         _hashBox = new TextBox { Width = 110, Font = MonoFont };
-        SetTip(_hashBox, "The table3 hash, pasted as hex (0x prefix optional). Editing it fixes the value " +
-                         "written on save");
+        SetTip(_hashBox, "The CRC32 hash (table3), pasted as hex (0x prefix optional). Editing it fixes the " +
+                         "value written on save");
         _hashCompute = new Button { Text = "Calculate CRC32", AutoSize = true, FlatStyle = FlatStyle.System };
         SetTip(_hashCompute, "Ask for a name and compute crc32(name) & 0x7FFFFFFF");
         var hashRow = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0), WrapContents = false };
@@ -132,7 +132,7 @@ public sealed class TextureInspectorPanel : UserControl
         hashRow.Controls.Add(_hashCompute);
 
         var hashCard = NewCard("Hash", out var hashGrid);
-        AddRow(hashGrid, "Hash (table3)", hashRow);
+        AddRow(hashGrid, "CRC32 Hash", hashRow);
         AddToStack(stack, hashCard);
 
         // --- Flags -----------------------------------------------------------------------

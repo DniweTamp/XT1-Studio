@@ -28,7 +28,8 @@ public static class TextureOperations
     /// alongside the old payload, and undoing would leave a header that lies about its payload.
     /// </summary>
     public static OperationResult Replace2D(EditableTexture texture, RgbaImage image,
-        ITextureEncoder encoder, bool generateMips, EncodeQuality quality, byte[]? originalHeader = null)
+        ITextureEncoder encoder, bool generateMips, EncodeQuality quality, byte[]? originalHeader = null,
+        bool syncFlags = false)
     {
         var beforePayload = texture.Payload;
         var beforeHeader = originalHeader ?? texture.Header.Raw.ToArray();
@@ -38,10 +39,15 @@ public static class TextureOperations
         var beforeMips = texture.Header.MipCount;
         var beforeW = texture.Header.Width;
         var beforeH = texture.Header.Height;
+        var beforeTable2 = (byte[])texture.Table2Bytes.Clone();
 
         var result = TextureEncoder.Encode2D(texture, image, encoder, generateMips, quality);
         if (!result.Success)
             return OperationResult.Fail(result.Error ?? "encode failed");
+
+        // Sync before snapshotting the new state so the flag bytes are part of the undoable state;
+        // otherwise Undo would restore the old payload and format but keep the new table2 flags.
+        if (syncFlags) SyncFlagsFromFormat(texture);
 
         // Not a no-op: capture the new state so Undo can restore it.
         var afterPayload = texture.Payload;
@@ -51,12 +57,14 @@ public static class TextureOperations
         var afterMips = texture.Header.MipCount;
         var afterW = texture.Header.Width;
         var afterH = texture.Header.Height;
+        var afterTable2 = (byte[])texture.Table2Bytes.Clone();
 
         _pendingCommand = new DelegateCommand("Replace texture",
             () =>
             {
                 texture.Payload = afterPayload;
                 afterHeader.CopyTo(texture.Header.Raw, 0);
+                afterTable2.CopyTo(texture.Table2Bytes, 0);
                 texture.PayloadSize = afterSize;
                 texture.Header.ImageSize = afterImageSize;
                 texture.Header.MipCount = afterMips;
@@ -67,6 +75,7 @@ public static class TextureOperations
             {
                 texture.Payload = beforePayload;
                 beforeHeader.CopyTo(texture.Header.Raw, 0);
+                beforeTable2.CopyTo(texture.Table2Bytes, 0);
                 texture.PayloadSize = beforeSize;
                 texture.PayloadOffset = beforeOffset;
                 texture.Header.ImageSize = beforeImageSize;
@@ -76,6 +85,93 @@ public static class TextureOperations
             });
 
         return OperationResult.Ok();
+    }
+
+    /// <summary>
+    /// Replace a texture from an already-compressed DDS, losslessly (surfaces are copied, not
+    /// decoded/re-encoded) and with the DDS's own mip chain. Wrapped in an undoable command.
+    /// </summary>
+    public static OperationResult ReplaceWithDds(EditableTexture texture, DdsImage dds, bool syncFlags = false)
+    {
+        var beforePayload = texture.Payload;
+        var beforeHeader = texture.Header.Raw.ToArray();
+        var beforeSize = texture.PayloadSize;
+        var beforeImageSize = texture.Header.ImageSize;
+        var beforeMips = texture.Header.MipCount;
+        var beforeW = texture.Header.Width;
+        var beforeH = texture.Header.Height;
+        var beforeDepth = texture.Header.Depth;
+        var beforeTable2 = (byte[])texture.Table2Bytes.Clone();
+
+        var result = TextureEncoder.ImportDds(texture, dds);
+        if (!result.Success)
+        {
+            beforeHeader.CopyTo(texture.Header.Raw, 0);
+            return OperationResult.Fail(result.Error ?? "DDS import failed");
+        }
+
+        // Sync before snapshotting so the flag bytes take part in Undo/Redo (see Replace2D).
+        if (syncFlags) SyncFlagsFromFormat(texture);
+
+        var afterPayload = texture.Payload;
+        var afterHeader = texture.Header.Raw.ToArray();
+        var afterSize = texture.PayloadSize;
+        var afterImageSize = texture.Header.ImageSize;
+        var afterMips = texture.Header.MipCount;
+        var afterW = texture.Header.Width;
+        var afterH = texture.Header.Height;
+        var afterDepth = texture.Header.Depth;
+        var afterTable2 = (byte[])texture.Table2Bytes.Clone();
+
+        _pendingCommand = new DelegateCommand("Replace from DDS",
+            () =>
+            {
+                texture.Payload = afterPayload;
+                afterHeader.CopyTo(texture.Header.Raw, 0);
+                afterTable2.CopyTo(texture.Table2Bytes, 0);
+                texture.PayloadSize = afterSize;
+                texture.Header.ImageSize = afterImageSize;
+                texture.Header.MipCount = afterMips;
+                texture.Header.Width = afterW;
+                texture.Header.Height = afterH;
+                texture.Header.Depth = afterDepth;
+            },
+            () =>
+            {
+                texture.Payload = beforePayload;
+                beforeHeader.CopyTo(texture.Header.Raw, 0);
+                beforeTable2.CopyTo(texture.Table2Bytes, 0);
+                texture.PayloadSize = beforeSize;
+                texture.Header.ImageSize = beforeImageSize;
+                texture.Header.MipCount = beforeMips;
+                texture.Header.Width = beforeW;
+                texture.Header.Height = beforeH;
+                texture.Header.Depth = beforeDepth;
+            });
+
+        return OperationResult.Ok();
+    }
+
+    /// <summary>Build a brand-new editable texture from an already-compressed DDS (lossless).</summary>
+    public static EditableTexture? BuildFromDds(DdsImage dds, string? name, out string? error)
+    {
+        error = null;
+        if (dds.Format is null)
+        {
+            error = "the DDS uses a format with no XT1 equivalent";
+            return null;
+        }
+
+        var texture = EditableTexture.CreateNew(dds.Format.Format, (uint)dds.Width, (uint)dds.Height);
+        var result = TextureEncoder.ImportDds(texture, dds);
+        if (!result.Success)
+        {
+            error = result.Error;
+            return null;
+        }
+
+        texture.Name = name;
+        return texture;
     }
 
     /// <summary>Replace a cubemap from six faces. See <see cref="Replace2D"/> for <paramref name="originalHeader"/>.</summary>
@@ -154,6 +250,18 @@ public static class TextureOperations
             });
     }
 
+    /// <summary>
+    /// Bring the stored table2 sRGB and cubemap bits in line with the texture's format and type.
+    /// Used after an add/replace so the record's flags describe the payload it actually carries.
+    /// </summary>
+    public static void SyncFlagsFromFormat(EditableTexture texture)
+    {
+        var info = texture.FormatInfo;
+        if (info is null) return;
+        texture.SetSrgbFlag(info.IsSrgb);
+        texture.SetCubeUsageFlag(texture.Header.Type.IsCube());
+    }
+
     /// <summary>Recompute <c>imageSize</c> from the current header fields (advisory helper).</summary>
     public static ulong RecomputeImageSize(EditableTexture texture)
     {
@@ -203,6 +311,45 @@ public static class TextureOperations
                 for (int i = 0; i < section.Bank.Textures.Count; i++)
                     section.Bank.Textures[i].Header.TextureFlag = before[i];
             });
+    }
+
+    /// <summary>
+    /// Replace a texture from a raw `.xt1` blob (header + payload): both are copied verbatim, so a
+    /// texture exported with "Export .xt1..." can be pasted back into any slot. Falls back to a
+    /// payload-only replace when the bytes are not an XT1 record.
+    /// </summary>
+    public static OperationResult ReplaceWithXt1(EditableTexture texture, byte[] bytes)
+    {
+        if (!RawXt1.HasMagic(bytes))
+            return ReplaceRawPayload(texture, bytes, requireExactSize: false);
+
+        var raw = RawXt1.Parse(bytes);
+        var beforeHeader = texture.Header.Raw.ToArray();
+        var beforePayload = texture.Payload;
+        var beforeSize = texture.PayloadSize;
+        var afterHeader = raw.Header.Raw.ToArray();
+        var afterPayload = (byte[])raw.Payload.Clone();
+        var afterSize = (uint)Math.Min(afterPayload.Length, uint.MaxValue);
+
+        raw.Header.Raw.CopyTo(texture.Header.Raw, 0);
+        texture.Payload = afterPayload;
+        texture.PayloadSize = afterSize;
+
+        _pendingCommand = new DelegateCommand("Replace from XT1",
+            () =>
+            {
+                afterHeader.CopyTo(texture.Header.Raw, 0);
+                texture.Payload = afterPayload;
+                texture.PayloadSize = afterSize;
+            },
+            () =>
+            {
+                beforeHeader.CopyTo(texture.Header.Raw, 0);
+                texture.Payload = beforePayload;
+                texture.PayloadSize = beforeSize;
+            });
+
+        return OperationResult.Ok();
     }
 
     /// <summary>Replace the raw payload bytes directly (size mismatch is allowed but warned).</summary>

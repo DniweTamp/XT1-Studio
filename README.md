@@ -14,13 +14,16 @@ cases.
 - Optional native dependencies, auto-detected, all overridable in **Tools → Settings**:
   - NVIDIA Texture Tools 3.2.5: `nvtt30205.dll` / `nvtt_export.exe`
     (default `C:\Program Files\NVIDIA Corporation\NVIDIA Texture Tools`)
-  - Oodle: `oo2core_7_win64.dll` (default `C:\bayonetta_tools\pkztools`)
 
 ```powershell
 dotnet build Xt1Tool.sln
 dotnet test  tests\Xt1.Core.Tests\Xt1.Core.Tests.csproj
 dotnet run   --project src\Xt1.App\Xt1.App.csproj
 ```
+
+The tool is portable: `settings.json` (backend, defaults, tool paths, last opened folder) lives in the
+same directory as the executable. A settings file left in the old `%APPDATA%\Xt1Studio` location is
+migrated on first launch.
 
 ### Release publish
 
@@ -36,8 +39,8 @@ framework-dependent, `win-x64`, single file, ReadyToRun off) and writes to
 ```
 
 All managed assemblies are bundled into `Xt1.App.exe`. In the default (profile) mode the native
-`glfw3.dll` (OpenGL windowing) and the optional `oo2core_7_win64.dll` sit next to it, plus `.pdb`
-symbols; `/bundle-natives` folds the natives in too so the folder contains only the executable.
+`glfw3.dll` (OpenGL windowing) sits next to it, plus `.pdb` symbols; `/bundle-natives` folds the
+natives in too so the folder contains only the executable.
 Framework-dependent output requires the .NET 8 Desktop Runtime on the target machine.
 
 ### Headless self-check
@@ -106,9 +109,9 @@ These were re-derived from `D:\Bayonetta3\romfs` and are locked by tests:
 ## Layout
 
 ```
-src/Xt1.Core   net8.0, no UI: containers, XT1 model, swizzle, layout, codecs, NVTT/Oodle interop, writers, editing
+src/Xt1.Core   net8.0, no UI: containers, XT1 model, swizzle, layout, codecs, NVTT interop, writers, editing
 src/Xt1.App    net8.0-windows: WinForms shell, GDI+ 2D viewer, OpenGL cubemap/volume viewport, dialogs
-tests/Xt1.Core.Tests  393 tests, real-file validation against D:\Bayonetta3\romfs when present
+tests/Xt1.Core.Tests  418 tests, real-file validation against D:\Bayonetta3\romfs when present
 ```
 
 `Xt1.Core` is headless and fully testable; the app only consumes it.
@@ -118,9 +121,9 @@ tests/Xt1.Core.Tests  393 tests, real-file validation against D:\Bayonetta3\romf
 - Open `.wta`, `.dat`, `.dtt`, `.wtb`, `.xt1`; a `.dat` pairs automatically with its `.dtt`
   (and vice versa), and a split effect `.wta` automatically pairs with its sibling `.wtp`.- Collapsible container tree. Banks reach it under two tags: `"wta"` (whose payload is paired from
   the `"wtp"` sub-files) and `"wtb"` (a standalone bank carrying its payload inline). A container
-  with several banks gets one branch per bank, labeled with the DAT's own sub-file name, and the
-  toolbar selector appears when there is more than one. Single-bank containers keep a short
-  `wta`/`wtb` label. Texture leaves show the `table3` hash after the index when the bank has one:
+  with several banks gets one branch per bank, labeled with the DAT's own sub-file name. There is no
+  separate bank selector: every bank is already a branch of the same tree. Single-bank containers keep
+  a short `wta`/`wtb` label. Texture leaves show the `table3` hash after the index when the bank has one:
 
   ```
   core.dat  (DAT)
@@ -165,8 +168,8 @@ tests/Xt1.Core.Tests  393 tests, real-file validation against D:\Bayonetta3\romf
   - Flags: the confirmed `table2` bits as named toggles — Model / UI bank entry, sRGB color space,
     Cube map usage — with the raw 4 bytes shown muted underneath for anything the toggles do not
     cover. Bit `0x08` is deliberately not offered: it was first read as "compressed", but per
-    `XT1_FORMAT.md` §4 it marks the `0x01` (`"af"`) single-channel format, and Oodle is a property of
-    the container sub-file rather than of a texture.
+    `XT1_FORMAT.md` §4 it marks the `0x01` (`"af"`) single-channel format rather than a texture
+    property.
   - **Show advanced fields** reveals the developer view: the technical summary (decoded header,
     `table0/1/2/3`, per-mip layout offsets), the scrollable typed editor for every raw field, and the
     DAT sub-file table. That table is virtualized (some containers hold thousands of sub-files —
@@ -174,17 +177,24 @@ tests/Xt1.Core.Tests  393 tests, real-file validation against D:\Bayonetta3\romf
   - Raw bytes of the XT1 header (or any table blob) open in their own hex dialog; unknown bytes
     survive a round trip.
 - Right-click menu in the container tree for the edit/export actions, so they sit where a texture is
-  selected instead of in the menu bar: import image/DDS (replace), replace raw payload, export PNG /
-  all mips / DDS / raw XT1, add texture from image, delete texture, recompute image size, copy hash,
-  validate this texture, plus the bank-level export, batch-force and validate entries. Items are
-  enabled per selection: DDS export only for formats that can be written, bank actions only when a
-  bank is loaded, and so on.
+  selected instead of in the menu bar: **Replace...** (an image is re-encoded through the import
+  dialog; a `.dds` is copied in losslessly, mips included), **Replace with .xt1...**, an **Export**
+  submenu (`.png` / `.dds` / `.xt1`), add texture from image or DDS, delete texture, copy hash, and
+  the bank-level PNG export. Items are enabled per selection: DDS export only for formats that can be
+  written (including ASTC), bank actions only when a bank is loaded, and so on.
 - 2D viewer: pan/zoom, mip selection, R/G/B/A isolation, alpha checkerboard, optional gamma. For a 3D
   texture it shows the currently selected slice (with pan/zoom preserved while scrubbing), so one
   slice can be inspected while the GL tab shows the whole volume.
 - GL viewport:
-  - **Cubemap**: an inside-out skybox. Drag to turn, wheel to change the field of view, double-click
-    to reset.
+  - **Cubemap**: an inside-out skybox. Entering the view starts level and forward (it does not
+    inherit the volume's orbit angles). Drag or the arrow keys look around (drag right turns right,
+    drag up looks up). The look uses `Ry(yaw)*Rx(pitch)` - pitch in the camera's own frame, then yaw
+    about world up - so the camera's right vector is always horizontal and the horizon cannot roll or
+    flip; pitch is capped ~10 degrees short of vertical. (The volume's orbit camera keeps the
+    `Rx(pitch)*Ry(yaw)` form it needs to swing an object upright.) A drag that reaches the viewport
+    edge is wrapped back to the middle so a long turn does not stall; wheel changes the field of
+    view; double-click or Home resets. The shared channel selector isolates R/G/B/A here too, and explicit
+    **Gamma** / **Exposure** controls sit at the right of the slice bar.
   - **3D texture**: the whole volume assembled into one ray-marched object. The camera orbits it —
     the target stays at the origin for every angle, drag swings the object round, wheel dollies in
     and out, double-click resets. A faint bounding box is drawn so the object reads even where it is
@@ -196,19 +206,25 @@ tests/Xt1.Core.Tests  393 tests, real-file validation against D:\Bayonetta3\romf
     `Opaque a` toggle and the render-mode combo are two views of the same "ignore alpha" choice, so
     the button applies in 3D too; a volume whose alpha is uniform defaults to `RGB`, because alpha
     carries no density there.
-  - **Channel isolation** (`R`/`G`/`B`/`A`) applies to the volume and its slices, not just the 2D
-    viewer.
+  - **Channel isolation** (`R`/`G`/`B`/`A`) applies to the cubemap, the volume and its slices, not
+    just the 2D viewer.
   - **Slice planes** (off by default) overlay the three axis cross-sections; the slice control moves
     them and switches the 2D tab to that slice.
   - Volumes are assembled whole; only a volume larger than 512 slices or 64M texels is truncated, and
     the status line says so when that happens.
 
-- Import image/DDS (replace or add), replace raw payload, delete texture, batch-force `table2`
-  byte or `textureFlag`, recompute `imageSize`, per-texture export to PNG / all mips / DDS /
-  raw `.xt1`, and a bank- or container-wide PNG export. All of it is in the tree's right-click menu.
-- Batch build over a folder of banks, with format/backend/quality/mips options and a live log.
-  It writes to a separate output folder by default; overwriting originals in place requires an
-  explicit opt-in and a confirmation, and files where nothing was converted are not rewritten.
+- Import/replace from an image or a DDS (a DDS is copied in losslessly with its own mips; adding a
+  DDS works too), add/delete textures, per-texture export to PNG / DDS / raw `.xt1`, and a bank- or
+  container-wide PNG export. All of it is in the tree's right-click menu.
+- **File → New empty bank...** authors a fresh `.wta`+`.wtp` or standalone `.wtb` with no textures.
+- **Tools → Batch recompress (ASTC to BC)**: re-encodes ASTC textures to BC1/BC3/BC7, keeping the
+  existing mip levels (none are regenerated) and only touching textures that decode cleanly. Optional
+  half-size downscale (drops mip 0 when a chain exists, otherwise box-filters a single-mip image,
+  with a checkbox to skip images that have no mips), a choice of BC formats including an
+  opacity-aware BC1/BC3 or BC1/BC7 rule, UNORM/sRGB respected. Runs on the loaded document or over a
+  folder of `.dat`/`.wta`/`.wtb`/`.xt1` files with an optional recursive scan.
+- WTB sRGB/cubemap flags can be kept in step with a texture's format on add/replace (on by default),
+  and new textures default to the model/UI bank class.
 - Undo/redo across field edits, raw byte edits, add/delete and re-encode.
 - Save is diff-preserving and atomic: unchanged sub-files, tables and reserved bytes are written
   back byte-for-byte, all outputs are staged next to their destinations first, and the payload
@@ -218,7 +234,8 @@ tests/Xt1.Core.Tests  393 tests, real-file validation against D:\Bayonetta3\romf
 
 ## Encoders
 
-Priority per the plan: NVTT in-process → `nvtt_export` CLI → managed.
+NVTT is the default backend; when it is not installed (or cannot encode a format) the managed
+encoder is the fallback.
 
 - **NVTT** (`nvtt30205.dll`, in-process P/Invoke, output captured via an output handler; one
   surface at a time, swizzled and packed by us) — preferred, handles BC1–BC7, BC6H and all 14
@@ -237,15 +254,12 @@ sRGB, and the real table comes from `XT1_FORMAT.md`.
 
 ## Known limitations
 
-- **Oodle**: decompression is wired and validated against a real `.pkz` payload. The installed
-  `oo2core_7_win64.dll` is a **decompress-only** build (`OodleLZ_Compress` always returns 0), so
-  recompression is offered but disabled when probed as unsupported; saves then write raw payloads.
 - **3D editing** is view-only. Volumes decode correctly (depth-interleaved) and preview assembled in
   the 3D viewport, but re-encoding a volume is rejected rather than approximated.
 - Signed BC4/BC5 and BC6H encoding are NVTT-only: the managed path reports them as unsupported
   instead of writing blocks with the wrong signedness, so without NVTT those formats are refused
   rather than silently mis-encoded. Only the tool paths NVTT actually consumes are configurable
-  (`nvtt30205.dll`, `nvtt_export.exe`, the Oodle DLL).
+  (`nvtt30205.dll`, `nvtt_export.exe`).
 - Alpha / binary-alpha and the `0x2C` textureFlag semantics are still unknown; they are exposed as
   free-form editable fields and preserved verbatim rather than interpreted.
 - No known unexplained layout mismatches remain: the former wide-pitch (multi-mip ASTC) and

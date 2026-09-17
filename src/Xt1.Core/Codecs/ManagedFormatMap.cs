@@ -42,7 +42,12 @@ public static class ManagedFormatMap
         {
             case Xt1Format.Bc1Unorm:
             case Xt1Format.Bc1Srgb:
-                compression = CompressionFormat.Bc1;
+                // Decode with the 1-bit alpha interpretation (DXT1A). Game BC1 textures commonly use
+                // it, and it only differs from plain BC1 in blocks whose endpoints are ordered
+                // color0 <= color1; decoding those as 4-colour would silently drop the cutout alpha.
+                // Encoding still emits plain BC1 and only switches to the alpha variant when the
+                // image actually has transparency.
+                compression = forEncoding ? CompressionFormat.Bc1 : CompressionFormat.Bc1WithAlpha;
                 return true;
             case Xt1Format.Bc2Unorm:
             case Xt1Format.Bc2Srgb:

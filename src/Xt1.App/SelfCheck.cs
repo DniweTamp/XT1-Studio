@@ -39,30 +39,11 @@ internal static class SelfCheck
         var settings = AppSettings.Load();
         var tools = settings.Resolve();
         log($"settings: {AppSettings.SettingsPath}");
-        log($"tools: nvttDll={tools.NvttDll ?? "-"} nvttCli={tools.NvttCli ?? "-"} oodle={tools.Oodle ?? "-"}");
+        log($"tools: nvttDll={tools.NvttDll ?? "-"} nvttCli={tools.NvttCli ?? "-"}");
 
-        OodleCodec? oodle = null;
         NvttNative? nvtt = null;
         try
         {
-            Check("oodle load", () =>
-            {
-                oodle = OodleCodec.TryCreate(out var error, tools.Oodle);
-                if (oodle is null) throw new InvalidOperationException(error);
-                return $"{Path.GetFileName(oodle.LibraryPath)} compression={oodle.SupportsCompression}";
-            });
-
-            if (oodle is not null)
-            {
-                // Round-trips through the codec itself, so a decompress-only build is reported as a
-                // property of the DLL rather than discovered later during a save.
-                Check("oodle self test", () =>
-                {
-                    oodle.SelfTest(out var message);
-                    return message;
-                });
-            }
-
             Check("nvtt load", () =>
             {
                 nvtt = NvttNative.TryCreate(out var error, tools.NvttDll);
@@ -73,7 +54,7 @@ internal static class SelfCheck
             var managed = new ManagedEncoder();
             NvttEncoder? nvttEncoder = nvtt is null ? null : new NvttEncoder(nvtt);
             var cli = CliEncoder.TryCreate(out _, tools.NvttCli);
-            var batch = new BatchConverter(settings, nvttEncoder, cli);
+            var encoders = new EncoderPicker(nvttEncoder, cli);
 
             var image = new RgbaImage(32, 32);
             for (int y = 0; y < 32; y++)
@@ -93,7 +74,7 @@ internal static class SelfCheck
             Check("managed encode/decode (ASTC 8x8)", () =>
             {
                 var info = FormatTable.Get(Xt1Format.Astc8x8Unorm)!;
-                var encoder = batch.Pick(EncoderBackend.Managed, info);
+                var encoder = encoders.Pick(EncoderBackend.Managed, info);
                 var encoded = encoder.Encode(image, info, false, EncodeQuality.Normal);
                 if (!encoded.Success) throw new InvalidOperationException(encoded.Error);
                 var decoded = TextureCodec.DecodeLinear(encoded.Data, 32, 32, info, out var error);
@@ -126,14 +107,14 @@ internal static class SelfCheck
             {
                 Check("load golden bank", () =>
                 {
-                    var document = BankDocument.Load(golden, tools.Oodle);
+                    var document = BankDocument.Load(golden);
                     return $"{Path.GetFileName(golden)}: {document.Sections.Count} section(s), " +
                            $"{document.AllTextures.Count()} textures";
                 });
 
                 Check("round-trip writer (no edits)", () =>
                 {
-                    var document = BankDocument.Load(golden, tools.Oodle);
+                    var document = BankDocument.Load(golden);
                     var result = BankWriter.Write(document, new WriteOptions());
                     var header = result.Files.First(f =>
                         f.Path.EndsWith(".dat", StringComparison.OrdinalIgnoreCase) ||
@@ -146,7 +127,7 @@ internal static class SelfCheck
 
                 Check("decode first texture", () =>
                 {
-                    var document = BankDocument.Load(golden, tools.Oodle);
+                    var document = BankDocument.Load(golden);
                     var texture = document.AllTextures.First(t => TextureCodec.CanDecode(t.FormatInfo));
                     var image = TextureCodec.Decode(texture, 0, 0, 0, out var error);
                     if (image is null) throw new InvalidOperationException(error);
@@ -155,11 +136,11 @@ internal static class SelfCheck
 
                 Check("re-encode texture", () =>
                 {
-                    var document = BankDocument.Load(golden, tools.Oodle);
+                    var document = BankDocument.Load(golden);
                     var texture = document.AllTextures.First(t => TextureCodec.CanDecode(t.FormatInfo));
                     var image = TextureCodec.Decode(texture, 0, 0, 0, out _)!;
                     var target = texture.FormatInfo!;
-                    var encoder = batch.Pick(settings.PreferredBackend, target);
+                    var encoder = encoders.Pick(settings.PreferredBackend, target);
                     var result = TextureOperations.Replace2D(texture, image, encoder, true, EncodeQuality.Normal);
                     if (!result.Success) throw new InvalidOperationException(result.Error);
                     if (!texture.Layout.SizeMatches)
@@ -169,11 +150,11 @@ internal static class SelfCheck
 
                 Check("save edited bank, reload, verify payload offsets", () =>
                 {
-                    var document = BankDocument.Load(golden, tools.Oodle);
+                    var document = BankDocument.Load(golden);
                     var texture = document.AllTextures.First(t =>
                         TextureCodec.CanDecode(t.FormatInfo) && t.Header.Type == TextureType.T2D);
                     var image = TextureCodec.Decode(texture, 0, 0, 0, out _)!;
-                    var encoder = batch.Pick(settings.PreferredBackend, texture.FormatInfo!);
+                    var encoder = encoders.Pick(settings.PreferredBackend, texture.FormatInfo!);
 
                     // Resize so the payload length changes and every later offset has to shift.
                     var resized = new RgbaImage(96, 64);
@@ -194,7 +175,7 @@ internal static class SelfCheck
                         var saved = output.Files.First(f =>
                             f.Path.EndsWith(".dat", StringComparison.OrdinalIgnoreCase) ||
                             f.Path.EndsWith(".wta", StringComparison.OrdinalIgnoreCase)).Path;
-                        var reloaded = BankDocument.Load(saved, tools.Oodle);
+                        var reloaded = BankDocument.Load(saved);
 
                         long expected = 0;
                         foreach (var reloadedTexture in reloaded.Sections[0].Bank.Textures)
@@ -218,7 +199,6 @@ internal static class SelfCheck
         finally
         {
             nvtt?.Dispose();
-            oodle?.Dispose();
         }
 
         log(failures == 0 ? "SELF-CHECK PASSED" : $"SELF-CHECK FAILED ({failures})");

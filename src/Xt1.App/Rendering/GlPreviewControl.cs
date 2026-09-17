@@ -51,13 +51,17 @@ public sealed class GlPreviewControl : GLControl
     private int _volumeTexture = -1;
 
     private IReadOnlyList<RgbaImage>? _pendingCubeFaces;
+    private IReadOnlyList<FloatImage>? _pendingCubeFacesHdr;
     private RgbaImage? _pendingVolume;
     private bool _cubeDirty;
+    private bool _cubeHdr;
     private bool _volumeDirty;
 
     private readonly OrbitCamera _camera = new();
     private bool _dragging;
     private Point _lastMouse;
+    private bool _lookInitialized;
+    private Point _lookAnchor;
 
     public GlPreviewControl()
         : base(new GLControlSettings
@@ -68,6 +72,30 @@ public sealed class GlPreviewControl : GLControl
         })
     {
         BackColor = Color.FromArgb(24, 24, 28);
+        SetStyle(ControlStyles.Selectable, true);
+        TabStop = true;
+    }
+
+    /// <summary>Arrow keys drive the look control, so they must reach the control instead of navigating.</summary>
+    protected override bool IsInputKey(Keys keyData)
+    {
+        if (_mode == PreviewMode.Cube)
+        {
+            switch (keyData)
+            {
+                case Keys.Left:
+                case Keys.Right:
+                case Keys.Up:
+                case Keys.Down:
+                case Keys.Home:
+                case Keys.Add:
+                case Keys.Subtract:
+                case Keys.Oemplus:
+                case Keys.OemMinus:
+                    return true;
+            }
+        }
+        return base.IsInputKey(keyData);
     }
 
     public bool Available { get; private set; }
@@ -100,6 +128,15 @@ public sealed class GlPreviewControl : GLControl
     /// <summary>Channel isolation, shared with the 2D viewer.</summary>
     public ImageChannelMode Channel { get; set; } = ImageChannelMode.Rgba;
 
+    /// <summary>Ignore the stored alpha (the cubemap's RGBA view stays fully opaque).</summary>
+    public bool OpaqueAlpha { get; set; }
+
+    /// <summary>Display gamma applied after exposure; 1.0 shows the stored values unchanged.</summary>
+    public float Gamma { get; set; } = 1f;
+
+    /// <summary>Linear exposure multiplier applied before gamma; 1.0 leaves the values unchanged.</summary>
+    public float Exposure { get; set; } = 1f;
+
     public float SliceX { get; set; } = 0.5f;
     public float SliceY { get; set; } = 0.5f;
     public float SliceZ { get; set; } = 0.5f;
@@ -113,8 +150,35 @@ public sealed class GlPreviewControl : GLControl
     public void SetCubeFaces(IReadOnlyList<RgbaImage> faces)
     {
         _pendingCubeFaces = faces;
+        _pendingCubeFacesHdr = null;
+        _cubeHdr = false;
         _cubeDirty = true;
         _mode = PreviewMode.Cube;
+        if (!_lookInitialized)
+        {
+            _camera.ResetLook();
+            _lookInitialized = true;
+        }
+        Invalidate();
+    }
+
+    /// <summary>
+    /// Upload an HDR cubemap as float faces. Exposure is applied to the unclamped values and a
+    /// tone map then brings them into display range, so the exposure control acts on the real HDR
+    /// data instead of on values that were already clamped at decode time.
+    /// </summary>
+    public void SetCubeFacesHdr(IReadOnlyList<FloatImage> faces)
+    {
+        _pendingCubeFacesHdr = faces;
+        _pendingCubeFaces = null;
+        _cubeHdr = true;
+        _cubeDirty = true;
+        _mode = PreviewMode.Cube;
+        if (!_lookInitialized)
+        {
+            _camera.ResetLook();
+            _lookInitialized = true;
+        }
         Invalidate();
     }
 
@@ -123,12 +187,15 @@ public sealed class GlPreviewControl : GLControl
         _pendingVolume = volume;
         _volumeDirty = true;
         _mode = PreviewMode.Volume;
+        // The volume has its own orbit framing; the next cubemap starts level again.
+        _lookInitialized = false;
         Invalidate();
     }
 
     public void ResetCamera()
     {
-        _camera.Reset();
+        if (_mode == PreviewMode.Cube) _camera.ResetLook();
+        else _camera.Reset();
         Invalidate();
     }
 
@@ -289,7 +356,12 @@ public sealed class GlPreviewControl : GLControl
 
     private void UploadPendingTextures()
     {
-        if (_cubeDirty && _pendingCubeFaces is { Count: 6 })
+        if (_cubeDirty && _pendingCubeFacesHdr is { Count: 6 })
+        {
+            _cubeTexture = UploadCubeMapHdr(_pendingCubeFacesHdr, _cubeTexture);
+            _cubeDirty = false;
+        }
+        else if (_cubeDirty && _pendingCubeFaces is { Count: 6 })
         {
             _cubeTexture = UploadCubeMap(_pendingCubeFaces, _cubeTexture);
             _cubeDirty = false;
@@ -348,6 +420,24 @@ public sealed class GlPreviewControl : GLControl
         return texture;
     }
 
+    private static int UploadCubeMapHdr(IReadOnlyList<FloatImage> faces, int existing)
+    {
+        int texture = existing >= 0 ? existing : GL.GenTexture();
+        GL.BindTexture(TextureTarget.TextureCubeMap, texture);
+        for (int i = 0; i < 6; i++)
+        {
+            var face = faces[i];
+            GL.TexImage2D(TextureTarget.TextureCubeMapPositiveX + i, 0, PixelInternalFormat.Rgba16f,
+                face.Width, face.Height, 0, PixelFormat.Rgba, PixelType.Float, face.Pixels);
+        }
+        GL.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        GL.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        GL.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GL.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        GL.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureWrapR, (int)TextureWrapMode.ClampToEdge);
+        return texture;
+    }
+
     private static int UploadVolume(RgbaImage volume, int existing)
     {
         int texture = existing >= 0 ? existing : GL.GenTexture();
@@ -396,14 +486,31 @@ public sealed class GlPreviewControl : GLControl
         if (_mode == PreviewMode.Cube && _cubeTexture >= 0 && _skyProgram >= 0)
         {
             GL.Disable(EnableCap.DepthTest);
-            GL.Disable(EnableCap.Blend);
+            // The skybox is opaque by default; with "Opaque Preview" off the faces' stored alpha is
+            // honoured instead, so the toggle (and an alpha cubemap) are visible.
+            if (OpaqueAlpha)
+            {
+                GL.Disable(EnableCap.Blend);
+            }
+            else
+            {
+                GL.Enable(EnableCap.Blend);
+                GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            }
             GL.UseProgram(_skyProgram);
             GL.ActiveTexture(TextureUnit.Texture0);
             GL.BindTexture(TextureTarget.TextureCubeMap, _cubeTexture);
             GL.Uniform1(Loc(_skyProgram, "uCube"), 0);
-            GL.UniformMatrix3(Loc(_skyProgram, "uRot"), 1, false, rotation);
+            // The look camera needs its own rotation: the orbit one tilts the horizon (camera-right
+            // Y = sin(pitch)*sin(yaw)), which is the "wonky" roll.
+            GL.UniformMatrix3(Loc(_skyProgram, "uRot"), 1, false, _camera.LookRotation());
             GL.Uniform1(Loc(_skyProgram, "uFov"), _camera.Fov);
             GL.Uniform1(Loc(_skyProgram, "uAspect"), aspect);
+            GL.Uniform1(Loc(_skyProgram, "uChannel"), ChannelIndex(Channel));
+            GL.Uniform1(Loc(_skyProgram, "uOpaque"), OpaqueAlpha ? 1 : 0);
+            GL.Uniform1(Loc(_skyProgram, "uHdr"), _cubeHdr ? 1 : 0);
+            GL.Uniform1(Loc(_skyProgram, "uGamma"), Gamma <= 0f ? 1f : Gamma);
+            GL.Uniform1(Loc(_skyProgram, "uExposure"), Exposure);
             GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
             return;
         }
@@ -481,11 +588,11 @@ public sealed class GlPreviewControl : GLControl
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
-        if (e.Button == MouseButtons.Left)
-        {
-            _dragging = true;
-            _lastMouse = e.Location;
-        }
+        if (e.Button != MouseButtons.Left) return;
+        Focus();
+        _dragging = true;
+        _lastMouse = e.Location;
+        if (_mode == PreviewMode.Cube) _lookAnchor = new Point(ClientSize.Width / 2, ClientSize.Height / 2);
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
@@ -494,12 +601,84 @@ public sealed class GlPreviewControl : GLControl
         _dragging = false;
     }
 
+    protected override void OnMouseCaptureChanged(EventArgs e)
+    {
+        base.OnMouseCaptureChanged(e);
+        if (!Capture) _dragging = false;
+    }
+
+    protected override void OnLostFocus(EventArgs e)
+    {
+        base.OnLostFocus(e);
+        _dragging = false;
+    }
+
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
         if (!_dragging) return;
-        _camera.Orbit(e.X - _lastMouse.X, e.Y - _lastMouse.Y);
+        float dx = e.X - _lastMouse.X;
+        float dy = e.Y - _lastMouse.Y;
+        // Cube: look around from inside the skybox (pitch clamped, never rolls). Volume: orbit the
+        // assembled object, where dragging should swing the model rather than turn a head.
+        if (_mode == PreviewMode.Cube)
+        {
+            _camera.Look(dx, dy);
+            // The look control is unbounded, so keep the drag alive at the viewport edge: when the
+            // cursor reaches one, jump it back to the middle and continue from there, discarding the
+            // warp's own delta. Without this a long turn just stops at the edge.
+            var position = PointToClient(Cursor.Position);
+            const int margin = 3;
+            if (position.X <= margin || position.Y <= margin ||
+                position.X >= ClientSize.Width - 1 - margin || position.Y >= ClientSize.Height - 1 - margin)
+            {
+                Cursor.Position = PointToScreen(_lookAnchor);
+                e = new MouseEventArgs(e.Button, e.Clicks, _lookAnchor.X, _lookAnchor.Y, e.Delta);
+            }
+        }
+        else
+        {
+            _camera.Orbit(dx, dy);
+        }
         _lastMouse = e.Location;
+        Invalidate();
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (_mode != PreviewMode.Cube) return;
+
+        const float step = 0.08f;
+        switch (e.KeyCode)
+        {
+            case Keys.Left:
+                _camera.LookBy(step, 0f);       // turn left
+                break;
+            case Keys.Right:
+                _camera.LookBy(-step, 0f);      // turn right
+                break;
+            case Keys.Up:
+                _camera.LookBy(0f, step);       // look up
+                break;
+            case Keys.Down:
+                _camera.LookBy(0f, -step);      // look down
+                break;
+            case Keys.Add:
+            case Keys.Oemplus:
+                _camera.ZoomFov(1f);
+                break;
+            case Keys.Subtract:
+            case Keys.OemMinus:
+                _camera.ZoomFov(-1f);
+                break;
+            case Keys.Home:
+                ResetCamera();
+                break;
+            default:
+                return;
+        }
+        e.Handled = true;
         Invalidate();
     }
 
@@ -595,10 +774,29 @@ uniform samplerCube uCube;
 uniform mat3 uRot;
 uniform float uFov;
 uniform float uAspect;
+uniform int uChannel;  // 0 = RGBA, 1 = R, 2 = G, 3 = B, 4 = A
+uniform int uOpaque;   // 1 = ignore the stored alpha
+uniform int uHdr;      // 1 = values are linear HDR and need a tone map
+uniform float uGamma;  // display gamma (1.0 = unchanged)
+uniform float uExposure;
 void main()
 {
     vec3 dir = normalize(uRot * vec3(vUv.x * uAspect * uFov, vUv.y * uFov, -1.0));
-    FragColor = vec4(texture(uCube, dir).rgb, 1.0);
+    vec4 s = texture(uCube, dir);
+    vec3 col = s.rgb;
+    if (uChannel == 1) col = vec3(s.r);
+    else if (uChannel == 2) col = vec3(s.g);
+    else if (uChannel == 3) col = vec3(s.b);
+    else if (uChannel == 4) col = vec3(s.a);
+    // Exposure acts on the unclamped values; the HDR path then tone maps so lowering exposure
+    // reveals highlights instead of just darkening a clipped image.
+    col = max(col * uExposure, vec3(0.0));
+    if (uHdr == 1) col = col / (1.0 + col);
+    if (abs(uGamma - 1.0) > 0.001) col = pow(col, vec3(1.0 / uGamma));
+    // Channel isolation is always opaque; the stored alpha is honoured only for the RGBA view
+    // when the opaque-alpha toggle is off.
+    float outAlpha = (uOpaque == 1 || uChannel != 0) ? 1.0 : s.a;
+    FragColor = vec4(col, outAlpha);
 }";
 
     /// <summary>

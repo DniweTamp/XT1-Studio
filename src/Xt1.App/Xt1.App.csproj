@@ -22,13 +22,4 @@
     <ProjectReference Include="..\Xt1.Core\Xt1.Core.csproj" />
   </ItemGroup>
 
-  <!-- Convenience: ship the optional native dependencies when they exist on the build machine.
-       Runtime resolution still goes through Settings / auto-detection; these copies only make
-       a fresh build work out of the box on this machine. Missing files are simply skipped. -->
-  <ItemGroup>
-    <None Include="C:\bayonetta_tools\pkztools\oo2core_7_win64.dll"
-          Condition="Exists('C:\bayonetta_tools\pkztools\oo2core_7_win64.dll')"
-          Link="oo2core_7_win64.dll" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
 </Project>

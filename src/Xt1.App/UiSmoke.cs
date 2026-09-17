@@ -22,8 +22,6 @@ internal static class UiSmoke
         {
             Step("begin");
 
-            var settings = AppSettings.Load();
-            var tools = settings.Resolve();
             var target = path;
             if (target is null || !File.Exists(target))
             {
@@ -41,7 +39,7 @@ internal static class UiSmoke
                 return 0;
             }
 
-            var document = BankDocument.Load(target, tools.Oodle);
+            var document = BankDocument.Load(target);
             Step($"loaded {document.DisplayName}: {document.Sections.Count} bank(s)");
 
             var section = document.Sections[0];
@@ -116,7 +114,7 @@ internal static class UiSmoke
             log($"       inspector:  {inspectorForm.UiTestInspectorState}");
             log($"       validation: {inspectorForm.UiTestInspectorValidation}");
             Expect(log, inspectorForm.UiTestInspectorState.Contains("hash=0x"),
-                "the inspector shows the table3 hash", inspectorForm.UiTestInspectorState);
+                "the inspector shows the CRC32 hash", inspectorForm.UiTestInspectorState);
             Expect(log, inspectorForm.UiTestInspectorValidation.Length > 0,
                 "the inspector shows a validation verdict", inspectorForm.UiTestInspectorValidation);
 
@@ -142,24 +140,52 @@ internal static class UiSmoke
 
             var textureMenu = inspectorForm.UiTestTreeMenuItems();
             foreach (var item in textureMenu) log($"       menu: {item}");
-            Expect(log, textureMenu.Contains("Import image / DDS (replace)...|enabled"),
-                "the texture menu offers import", "Import image / DDS (replace)...");
+            Expect(log, textureMenu.Contains("Replace...|enabled"),
+                "the texture menu offers replace", "Replace...");
+            Expect(log, textureMenu.Contains("Replace with .xt1...|enabled"),
+                "the texture menu offers a raw replace", "Replace with .xt1...");
             Expect(log, textureMenu.Contains("Delete texture|enabled"),
                 "the texture menu offers delete", "Delete texture");
-            Expect(log, textureMenu.Contains("Export PNG...|enabled"),
-                "the texture menu offers export", "Export PNG...");
-            Expect(log, textureMenu.Contains("Export raw XT1...|enabled"),
-                "the texture menu offers a raw export", "Export raw XT1...");
+            Expect(log, textureMenu.Contains("Export|enabled"),
+                "the texture menu offers the grouped export", "Export");
 
             // The bank node keeps the bank-level actions.
             var sectionNode = inspectorForm.UiTestSelectNode("textures)");
             Pump(log, ref watch, $"selected the bank node ({sectionNode})", 20);
             var bankMenu = inspectorForm.UiTestTreeMenuItems();
-            Expect(log, bankMenu.Contains("Batch force table2 byte...|enabled"),
-                "the bank menu offers the batch tools", "Batch force table2 byte...");
+            Expect(log, bankMenu.Contains("Export every texture in this bank (PNG folder)...|enabled"),
+                "the bank menu offers the bank export", "Export every texture in this bank (PNG folder)...");
 
             inspectorForm.Close();
             Step("inspector MainForm closed");
+
+            // Phase 3: the dialogs, built and laid out headlessly so a broken AutoSize/AutoScroll
+            // arrangement is caught without a human opening each one.
+            Step("--- dialogs ---");
+            using (var settingsDialog = new Forms.SettingsDialog(AppSettings.Load()))
+            {
+                settingsDialog.Show();
+                Pump(log, ref watch, "settings dialog shown", 40);
+                var rows = settingsDialog.UiTestRowAlignment();
+                int misaligned = rows.Count(r =>
+                    r.EditorLeft < r.LabelRight - 2 || Math.Abs(r.LabelCenterY - r.EditorCenterY) > 6);
+                Expect(log, rows.Count > 0 && misaligned == 0, "settings rows align",
+                    $"{rows.Count} rows, {misaligned} misaligned");
+                settingsDialog.Close();
+            }
+            using (var newBank = new Forms.NewBankDialog())
+            {
+                newBank.Show();
+                Pump(log, ref watch, "new-bank dialog shown", 20);
+                newBank.Close();
+            }
+            using (var recompress = new Forms.BatchRecompressDialog(
+                       (_, _, _) => Task.CompletedTask, Xt1.Core.Encoding.EncoderBackend.Nvtt, hasDocument: true))
+            {
+                recompress.Show();
+                Pump(log, ref watch, "batch-recompress dialog shown", 40);
+                recompress.Close();
+            }
 
             // Phase 3: a 3D texture, to exercise the volume view wiring the way clicks would:
             // the assembled render, per-channel isolation, the opaque switch and the slice planes.

@@ -51,8 +51,20 @@ public static class DdsIo
         [99] = Xt1Format.Bc7Srgb,
     };
 
-    private static readonly Dictionary<Xt1Format, uint> Xt1ToDxgi =
-        DxgiToXt1.GroupBy(kv => kv.Value).ToDictionary(g => g.Key, g => g.First().Key);
+    private static readonly Dictionary<Xt1Format, uint> Xt1ToDxgi;
+
+    // ASTC LDR DXGI formats are laid out as TYPELESS/UNORM/SRGB triples starting at 133, so for
+    // footprint i the UNORM value is 134 + 3i and the sRGB value 135 + 3i (i = 0..13). Added here
+    // (not in DxgiToXt1's initializer) so the reverse Xt1ToDxgi map below sees them.
+    static DdsIo()
+    {
+        for (int i = 0; i < FormatTable.AstcFootprintNames.Length; i++)
+        {
+            DxgiToXt1[134u + (uint)(3 * i)] = (Xt1Format)(0x79 + i);
+            DxgiToXt1[135u + (uint)(3 * i)] = (Xt1Format)(0x87 + i);
+        }
+        Xt1ToDxgi = DxgiToXt1.GroupBy(kv => kv.Value).ToDictionary(g => g.Key, g => g.First().Key);
+    }
 
     public static bool CanExport(FormatInfo format) => Xt1ToDxgi.ContainsKey(format.Format);
 

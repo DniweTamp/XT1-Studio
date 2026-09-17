@@ -5,6 +5,7 @@ using Xt1.Core.Encoding;
 using Xt1.Core.Format;
 using Xt1.Core.Imaging;
 using Xt1.Core.Nvtt;
+using Xt1.Core.Util;
 using Xt1.Core.Xt1;
 using Xunit;
 
@@ -239,5 +240,169 @@ public class EditingTests
         Assert.Equal(format.Format, read.Format!.Format);
         for (int m = 0; m < mipCount; m++)
             Assert.Equal(data[0][m], read.Data[0][m]);
+    }
+
+    /// <summary>ASTC can be written to (and read back from) a DX10 DDS like any BC format.</summary>
+    [Theory]
+    [InlineData(Xt1Format.Astc4x4Unorm)]
+    [InlineData(Xt1Format.Astc8x8Srgb)]
+    public void Dds_RoundTripsAstc(Xt1Format xt1Format)
+    {
+        var format = FormatTable.Get(xt1Format)!;
+        Assert.True(DdsIo.CanExport(format));
+
+        int width = 32, height = 32;
+        int wb = Mem.DivUp(width, format.BlockWidth);
+        int hb = Mem.DivUp(height, format.BlockHeight);
+        var surface = new byte[wb * hb * format.BytesPerBlock];
+        for (int i = 0; i < surface.Length; i++) surface[i] = (byte)(i * 7);
+        var data = new byte[1][][] { new[] { surface } };
+
+        var bytes = DdsIo.Write(format, width, height, 1, 1, 1, false, data);
+        var read = DdsIo.Read(bytes);
+        Assert.Equal(format.Format, read.Format!.Format);
+        Assert.Equal(surface, read.Data[0][0]);
+    }
+
+    /// <summary>
+    /// Replacing from a DDS is lossless: the stored surfaces are copied straight through and the
+    /// DDS's own mip chain is kept, without an encode/decode round trip.
+    /// </summary>
+    [Fact]
+    public void ReplaceWithDds_IsLosslessAndKeepsMips()
+    {
+        var format = FormatTable.Get(Xt1Format.Astc6x6Unorm)!;
+        int width = 64, height = 64, mips = 4;
+        var data = new byte[1][][];
+        data[0] = new byte[mips][];
+        for (int m = 0; m < mips; m++)
+        {
+            int w = Math.Max(1, width >> m);
+            int h = Math.Max(1, height >> m);
+            int wb = Mem.DivUp(w, format.BlockWidth);
+            int hb = Mem.DivUp(h, format.BlockHeight);
+            data[0][m] = new byte[wb * hb * format.BytesPerBlock];
+            for (int i = 0; i < data[0][m].Length; i++) data[0][m][i] = (byte)(i + m * 3);
+        }
+
+        var ddsBytes = DdsIo.Write(format, width, height, 1, mips, 1, false, data);
+        var dds = DdsIo.Read(ddsBytes);
+
+        var texture = EditableTexture.CreateNew(Xt1Format.Bc7Unorm, 8, 8);
+        var result = TextureOperations.ReplaceWithDds(texture, dds);
+        Assert.True(result.Success, result.Error);
+
+        Assert.Equal(format.Format, texture.Header.Format);
+        Assert.Equal(mips, texture.Header.MipCount);
+        Assert.Equal((uint)width, texture.Header.Width);
+        Assert.NotNull(texture.FormatInfo);
+        Assert.True(texture.Layout.SizeMatches, texture.Layout.Note);
+
+        // Every stored surface must come back byte-identical (no re-encode happened).
+        for (int m = 0; m < mips; m++)
+        {
+            var linear = TextureCodec.ExtractLinearBlocks(texture, m, 0, 0, out _, out _);
+            Assert.Equal(data[0][m], linear);
+        }
+    }
+
+    /// <summary>
+    /// The batch recompressor's core: decode the existing mip chain of an ASTC texture and re-encode
+    /// those same levels as BC, without generating new mips.
+    /// </summary>
+    [Fact]
+    public void EncodeLevels_RecompressesExistingAstcMipsToBc()
+    {
+        var astc = FormatTable.Get(Xt1Format.Astc8x8Unorm)!;
+        var image = new RgbaImage(64, 64);
+        for (int y = 0; y < 64; y++)
+            for (int x = 0; x < 64; x++)
+                image.SetPixel(x, y, (byte)(x * 4), (byte)(y * 4), (byte)((x + y) * 2), (byte)(x < 32 ? 0 : 255));
+
+        var texture = EditableTexture.CreateNew(astc.Format, 64, 64);
+        var first = TextureOperations.Replace2D(texture, image, new ManagedEncoder(), true, EncodeQuality.Normal);
+        Assert.True(first.Success, first.Error);
+        Assert.Equal(Xt1Format.Astc8x8Unorm, texture.Header.Format);
+        int sourceMips = texture.Header.MipCount;
+
+        var levels = new List<RgbaImage>();
+        for (int m = 0; m < sourceMips; m++)
+        {
+            var decoded = TextureCodec.Decode(texture, m, 0, 0, out var decodeError);
+            Assert.NotNull(decoded);
+            Assert.Null(decodeError);
+            levels.Add(decoded!);
+        }
+
+        var bc1 = FormatTable.Get(Xt1Format.Bc1Unorm)!;
+        texture.Header.Format = bc1.Format;
+        var recompressed = TextureEncoder.EncodeLevels(texture, levels, new ManagedEncoder(), EncodeQuality.Normal);
+        Assert.True(recompressed.Success, recompressed.Error);
+
+        Assert.Equal(Xt1Format.Bc1Unorm, texture.Header.Format);
+        Assert.Equal(sourceMips, texture.Header.MipCount); // no new mips were generated
+        Assert.True(texture.Layout.SizeMatches, texture.Layout.Note);
+        Assert.NotNull(TextureCodec.Decode(texture, 0, 0, 0, out _));
+    }
+
+    /// <summary>
+    /// Flag syncing runs inside the replace operation, so Undo restores the table2 sRGB flag along
+    /// with the format/payload instead of leaving the two disagreeing.
+    /// </summary>
+    [Fact]
+    public void Replace2D_UndoRestoresSyncedFlags()
+    {
+        var texture = EditableTexture.CreateNew(Xt1Format.Bc1Unorm, 16, 16);
+        Assert.False(texture.FormatInfo!.IsSrgb);
+        var originalHeader = texture.Header.Raw.ToArray();
+        var originalTable2 = (byte[])texture.Table2Bytes.Clone();
+
+        var image = new RgbaImage(16, 16);
+        for (int y = 0; y < 16; y++)
+            for (int x = 0; x < 16; x++)
+                image.SetPixel(x, y, 200, 100, 50, 255);
+
+        texture.Header.Format = Xt1Format.Bc1Srgb;
+        var result = TextureOperations.Replace2D(texture, image, new ManagedEncoder(), true,
+            EncodeQuality.Fastest, originalHeader, syncFlags: true);
+        Assert.True(result.Success, result.Error);
+        Assert.True(texture.FormatInfo!.IsSrgb);
+        Assert.NotEqual(originalTable2, texture.Table2Bytes);
+
+        var command = TextureOperations.TakePendingCommand();
+        Assert.NotNull(command);
+        command!.Undo();
+
+        Assert.Equal(Xt1Format.Bc1Unorm, texture.Header.Format);
+        Assert.Equal(originalTable2, texture.Table2Bytes);
+    }
+
+    /// <summary>A newly authored empty bank writes and reloads cleanly for both container shapes.</summary>
+    [Theory]
+    [InlineData(BankKind.EffectWta, ".wta")]
+    [InlineData(BankKind.StandaloneWtb, ".wtb")]
+    public void NewEmptyBank_RoundTrips(BankKind kind, string extension)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "Xt1Studio", "tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "new" + extension);
+            var document = BankDocument.CreateEmpty(kind, path);
+            Assert.Single(document.Sections);
+            Assert.Equal(0, document.Sections[0].Bank.Count);
+
+            BankWriter.Write(document, new WriteOptions()).SaveAll();
+            Assert.True(File.Exists(path));
+
+            var reloaded = BankDocument.Load(path);
+            Assert.Equal(kind, reloaded.Kind);
+            Assert.Single(reloaded.Sections);
+            Assert.Equal(0, reloaded.Sections[0].Bank.Count);
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch { }
+        }
     }
 }

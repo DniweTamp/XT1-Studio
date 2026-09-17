@@ -8,11 +8,6 @@ public sealed class WriteOptions
     /// <summary>Recompute <c>table0</c> payload offsets as align4096 cumulative sizes before writing.</summary>
     public bool RecomputePayloadOffsets { get; set; } = true;
 
-    /// <summary>Compress the payload side (`.wtp` / `.dtt`) with Oodle when the DLL supports it.</summary>
-    public bool RecompressOodle { get; set; }
-
-    public string? OodlePath { get; set; }
-
     /// <summary>Write the payload side even when it is unchanged.</summary>
     public bool WritePayloadSide { get; set; } = true;
 

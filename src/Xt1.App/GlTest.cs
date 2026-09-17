@@ -1,10 +1,9 @@
-﻿using System.Drawing.Imaging;
+using System.Drawing.Imaging;
 using Xt1.App.Rendering;
 using Xt1.Core.Codecs;
 using Xt1.Core.Containers;
 using Xt1.Core.Imaging;
 using Xt1.Core.Xt1;
-using Xt1.Core.Settings;
 
 namespace Xt1.App;
 
@@ -45,8 +44,7 @@ internal static class GlTest
         float? distance = CliOptions.GetFloat(args, "--distance");
         float? density = CliOptions.GetFloat(args, "--density");
 
-        var settings = AppSettings.Load();
-        var document = BankDocument.Load(file, settings.Resolve().Oodle);
+        var document = BankDocument.Load(file);
 
         var candidates = new List<(int Bank, EditableTexture Texture)>();
         foreach (var section in document.Sections)
@@ -90,7 +88,8 @@ internal static class GlTest
             return false;
         }
 
-        if (texture.Header.Type.IsCube()) return RunCube(texture, mip, size, yaw, pitch, outputDirectory, log);
+        if (texture.Header.Type.IsCube())
+            return RunCube(texture, mip, size, yaw, pitch, channel, outputDirectory, log);
 
         var slices = TextureCodec.DecodeVolumeSlices(texture, mip, 0, out var error);
         if (slices.Count == 0)
@@ -263,18 +262,24 @@ internal static class GlTest
     /// wheel zoom (which narrows the field of view here, since the camera cannot move) does too.
     /// </summary>
     private static bool RunCube(
-        EditableTexture texture, int mip, int size, float? yaw, float? pitch, string outputDirectory,
-        Action<string> log)
+        EditableTexture texture, int mip, int size, float? yaw, float? pitch, ImageChannelMode channel,
+        string outputDirectory, Action<string> log)
     {
-        var faces = TextureCodec.DecodeCubeFaces(texture, mip, out var error);
-        if (faces.Count != 6)
+        bool hdr = TextureCodec.IsHdr(texture.FormatInfo);
+        string? hdrError = null;
+        string? error = null;
+        var hdrFaces = hdr ? TextureCodec.DecodeCubeFacesHdr(texture, mip, out hdrError) : null;
+        var faces = hdrFaces is { Count: 6 } ? null : TextureCodec.DecodeCubeFaces(texture, mip, out error);
+        int faceWidth = hdrFaces is { Count: 6 } ? hdrFaces[0].Width : faces?.Count == 6 ? faces[0].Width : 0;
+        int faceHeight = hdrFaces is { Count: 6 } ? hdrFaces[0].Height : faces?.Count == 6 ? faces[0].Height : 0;
+        if (faceWidth == 0)
         {
-            log($"  x #{texture.Index}: {error ?? "cube decode failed"}");
+            log($"  x #{texture.Index}: {hdrError ?? error ?? "cube decode failed"}");
             return false;
         }
 
         log($"#{texture.Index} 0x{texture.EffectiveHash():X8} {texture.FormatInfo?.Name} " +
-            $"cube {faces[0].Width}x{faces[0].Height} mip {mip} (6 faces)");
+            $"cube {faceWidth}x{faceHeight} mip {mip} (6 faces){(hdrFaces is { Count: 6 } ? " HDR" : string.Empty)}");
 
         using var form = new Form
         {
@@ -293,9 +298,11 @@ internal static class GlTest
             return false;
         }
 
+        if (hdrFaces is { Count: 6 }) control.SetCubeFacesHdr(hdrFaces);
+        else control.SetCubeFaces(faces!);
+        // Applied after the faces: entering the cube view resets the look to a level orientation.
         if (yaw is not null) control.Camera.Yaw = yaw.Value;
         if (pitch is not null) control.Camera.Pitch = pitch.Value;
-        control.SetCubeFaces(faces);
         Application.DoEvents();
 
         Directory.CreateDirectory(outputDirectory);
@@ -358,6 +365,57 @@ internal static class GlTest
             {
                 ok &= Check(log, "wheel zoom changes the skybox", false, $"mean |diff| {difference:F2}");
             }
+        }
+
+        // Channel isolation must reach the skybox shader. A gray cubemap cannot show a difference,
+        // so that is reported as not applicable rather than failed.
+        if (channel == ImageChannelMode.Rgba && drawn.LuminanceSpread > 8)
+        {
+            control.Channel = ImageChannelMode.Red;
+            var red = Render(control, size);
+            control.Channel = ImageChannelMode.Rgba;
+            if (red is not null)
+            {
+                Save(red, Path.Combine(outputDirectory, stem + "_red.png"));
+                double difference = MeanAbsDiff(first, red);
+                ok &= Check(log, "channel isolation changes the cubemap image", difference > 0.5,
+                    $"mean |diff| {difference:F2}");
+            }
+        }
+
+        // Gamma and exposure must reach the shader.
+        control.Gamma = 2.2f;
+        var gamma = Render(control, size);
+        control.Gamma = 1f;
+        if (gamma is not null)
+        {
+            Save(gamma, Path.Combine(outputDirectory, stem + "_gamma.png"));
+            double difference = MeanAbsDiff(first, gamma);
+            ok &= Check(log, "gamma changes the cubemap image", difference > 0.5, $"mean |diff| {difference:F2}");
+        }
+
+        control.Exposure = 2f;
+        var exposed = Render(control, size);
+        control.Exposure = 1f;
+        if (exposed is not null)
+        {
+            Save(exposed, Path.Combine(outputDirectory, stem + "_exposure.png"));
+            double difference = MeanAbsDiff(first, exposed);
+            ok &= Check(log, "exposure changes the cubemap image", difference > 0.5, $"mean |diff| {difference:F2}");
+        }
+
+        // The opaque-alpha toggle only shows on a cubemap whose stored alpha is not uniform; that is
+        // reported as not applicable rather than failed for the usual all-opaque skybox.
+        control.OpaqueAlpha = true;
+        var opaqueCube = Render(control, size);
+        if (opaqueCube is not null)
+        {
+            Save(opaqueCube, Path.Combine(outputDirectory, stem + "_opaque.png"));
+            double difference = MeanAbsDiff(first, opaqueCube);
+            if (difference > 0.5)
+                ok &= Check(log, "opaque alpha changes the cubemap image", true, $"mean |diff| {difference:F2}");
+            else
+                log("  [--] opaque alpha: n/a (cubemap alpha is uniform)");
         }
 
         log(ok ? $"  ok #{texture.Index} cube -> {outputDirectory}" : $"  FAILED #{texture.Index}");

@@ -1,6 +1,5 @@
 using Xt1.Core.Codecs;
 using Xt1.Core.Containers;
-using Xt1.Core.Settings;
 
 namespace Xt1.App;
 
@@ -15,11 +14,8 @@ internal static class TreeDump
     {
         try
         {
-            var settings = AppSettings.Load();
-            var oodlePath = settings.Resolve().Oodle;
-
             if (Directory.Exists(path))
-                return RunFolder(path, oodlePath, log);
+                return RunFolder(path, log);
 
             if (!File.Exists(path))
             {
@@ -27,7 +23,7 @@ internal static class TreeDump
                 return 2;
             }
 
-            var single = Inspect(path, oodlePath, log, printTree: true);
+            var single = Inspect(path, log, printTree: true);
             return single.Failed == 0 && single.Error is null ? 0 : 1;
         }
         catch (Exception ex)
@@ -44,12 +40,12 @@ internal static class TreeDump
         List<string>? MismatchExamples = null,
         long MagentaPixels = 0, List<string>? MagentaExamples = null);
 
-    private static Inspection Inspect(string path, string? oodlePath, Action<string>? log, bool printTree)
+    private static Inspection Inspect(string path, Action<string>? log, bool printTree)
     {
         string name = Path.GetFileName(path);
         try
         {
-            var document = BankDocument.Load(path, oodlePath);
+            var document = BankDocument.Load(path);
             var rawTexture = document.RawXt1 is { } raw ? EditableTexture.FromRaw(raw) : null;
             var outline = BankOutline.Build(document, rawTexture);
 
@@ -174,7 +170,7 @@ internal static class TreeDump
         }
     }
 
-    private static int RunFolder(string directory, string? oodlePath, Action<string> log)
+    private static int RunFolder(string directory, Action<string> log)
     {
         var files = Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
             .Where(IsBankFile)
@@ -201,7 +197,7 @@ internal static class TreeDump
                 continue;
             }
 
-            var result = Inspect(file, oodlePath, log, printTree: false);
+            var result = Inspect(file, log, printTree: false);
             textures += result.Textures;
             decoded += result.Decoded;
             failedTextures += result.Failed;

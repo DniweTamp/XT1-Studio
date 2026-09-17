@@ -3,7 +3,6 @@ namespace Xt1.Core.Interop;
 /// <summary>Locates optional native tools. Paths are auto-detected and always overridable.</summary>
 public static class ToolLocator
 {
-    public const string OodleFileName = "oo2core_7_win64.dll";
     public const string NvttDllFileName = "nvtt30205.dll";
     public const string NvttCliFileName = "nvtt_export.exe";
 
@@ -11,11 +10,6 @@ public static class ToolLocator
     {
         @"C:\Program Files\NVIDIA Corporation\NVIDIA Texture Tools",
         @"C:\Program Files (x86)\NVIDIA Corporation\NVIDIA Texture Tools",
-    };
-
-    public static readonly string[] OodleDirectories =
-    {
-        @"C:\bayonetta_tools\pkztools",
     };
 
     /// <summary>
@@ -53,8 +47,6 @@ public static class ToolLocator
 
     private static IEnumerable<string> DefaultDirectoriesFor(string fileName)
     {
-        if (string.Equals(fileName, OodleFileName, StringComparison.OrdinalIgnoreCase))
-            return OodleDirectories;
         if (string.Equals(fileName, NvttDllFileName, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(fileName, NvttCliFileName, StringComparison.OrdinalIgnoreCase))
             return NvttInstallDirectories;

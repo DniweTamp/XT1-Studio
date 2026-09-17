@@ -1,23 +1,60 @@
-﻿using Xt1.Core.Encoding;
+using Xt1.Core.Encoding;
 using Xt1.Core.Format;
 using Xt1.Core.Settings;
 
 namespace Xt1.App.Forms;
 
-/// <summary>Tool paths, encoder preference and preview defaults.</summary>
+/// <summary>Encoder preference, import defaults, preview defaults and optional tool paths.</summary>
 public sealed class SettingsDialog : Form
 {
-    private readonly TextBox _nvttDll = new() { Width = 420 };
-    private readonly TextBox _nvttCli = new() { Width = 420 };
-    private readonly TextBox _oodle = new() { Width = 420 };
-    private readonly ComboBox _backend = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 180 };
-    private readonly ComboBox _defaultFormat = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 240 };
-    private readonly CheckBox _generateMips = new() { Text = "Generate full mip chains on import", AutoSize = true };
+    private const int LabelColumn = 170;
+
+    private readonly TextBox _nvttDll = new() { Dock = DockStyle.Fill };
+    private readonly TextBox _nvttCli = new() { Dock = DockStyle.Fill };
+    private readonly ComboBox _backend = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+    private readonly ComboBox _defaultFormat = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+    private readonly CheckBox _syncFlags = new()
+    {
+        Text = "Sync WTB sRGB / cubemap flags from the texture format on add or replace",
+        AutoSize = true,
+    };
     private readonly CheckBox _srgbPreview = new() { Text = "Apply sRGB display gamma by default", AutoSize = true };
-    private readonly CheckBox _recompressOodle = new() { Text = "Recompress payloads with Oodle on save (when supported)", AutoSize = true };
-    private readonly NumericUpDown _volumeCap = new() { Minimum = 64, Maximum = 2048, Increment = 64, Width = 90 };
+    private readonly CheckBox _opaqueAlpha = new() { Text = "Start with opaque alpha (ignore stored alpha)", AutoSize = true };
+    private readonly CheckBox _showAlpha = new() { Text = "Offer the alpha-only option in the channel selector", AutoSize = true };
+    private readonly NumericUpDown _volumeCap = new()
+    {
+        Minimum = 64, Maximum = 2048, Increment = 64, Width = 90, TextAlign = HorizontalAlignment.Left,
+    };
 
     public AppSettings Result { get; }
+
+    private TableLayoutPanel _grid = null!;
+
+    /// <summary>
+    /// Test hook: per row, the label's right edge / vertical center and the editor's left edge /
+    /// vertical center, so a regression in the alignment can be caught headlessly.
+    /// </summary>
+    internal IReadOnlyList<(string Label, int LabelRight, int LabelCenterY, int EditorLeft, int EditorCenterY)>
+        UiTestRowAlignment()
+    {
+        var rows = new List<(string, int, int, int, int)>();
+        foreach (Control control in _grid.Controls)
+        {
+            if (control is not Label label || label.AutoSize || _grid.GetColumn(label) != 0) continue;
+            int labelRow = _grid.GetRow(label);
+            foreach (Control editor in _grid.Controls)
+            {
+                if (editor == label || _grid.GetRow(editor) != labelRow || _grid.GetColumn(editor) != 1) continue;
+                rows.Add((label.Text,
+                    label.Right,
+                    label.Top + label.Height / 2,
+                    editor.Left,
+                    editor.Top + editor.Height / 2));
+                break;
+            }
+        }
+        return rows;
+    }
 
     public SettingsDialog(AppSettings settings)
     {
@@ -29,20 +66,9 @@ public sealed class SettingsDialog : Form
         MinimizeBox = false;
         MaximizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(620, 430);
+        ClientSize = new Size(680, 520);
 
-        var table = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill,
-            ColumnCount = 3,
-            Padding = new Padding(12),
-            AutoScroll = true,
-        };
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 80));
-
-        _backend.Items.AddRange(new object[] { EncoderBackend.Managed, EncoderBackend.Nvtt, EncoderBackend.Cli });
+        _backend.Items.AddRange(new object[] { EncoderBackend.Nvtt, EncoderBackend.Managed, EncoderBackend.Cli });
         _backend.SelectedItem = settings.PreferredBackend;
 
         var formats = FormatTable.All.Where(f => f.Codec is CodecKind.Bc or CodecKind.Astc or CodecKind.Raw)
@@ -52,25 +78,47 @@ public sealed class SettingsDialog : Form
         int selected = formats.FindIndex(f => f.Format == settings.DefaultImportFormat);
         _defaultFormat.SelectedIndex = selected >= 0 ? selected : 0;
 
-        _generateMips.Checked = settings.GenerateMips;
+        _syncFlags.Checked = settings.SyncFlagsFromFormat;
         _srgbPreview.Checked = settings.ApplySrgbPreview;
-        _recompressOodle.Checked = settings.RecompressOodleOnSave;
+        _opaqueAlpha.Checked = settings.OpaqueAlphaByDefault;
+        _showAlpha.Checked = settings.ShowAlphaChannel;
         _volumeCap.Value = Math.Clamp(settings.VolumeResolutionCap, 64, 2048);
         _nvttDll.Text = settings.NvttDllPath ?? string.Empty;
         _nvttCli.Text = settings.NvttCliPath ?? string.Empty;
-        _oodle.Text = settings.OodlePath ?? string.Empty;
+
+        var grid = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            Padding = new Padding(14, 10, 14, 10),
+            AutoScroll = true,
+        };
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, LabelColumn));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _grid = grid;
 
         int row = 0;
-        AddPathRow(table, ref row, "nvtt30205.dll", _nvttDll);
-        AddPathRow(table, ref row, "nvtt_export.exe", _nvttCli);
-        AddPathRow(table, ref row, "oo2core DLL", _oodle);
+        AddSection(grid, ref row, "Encoder");
+        AddRow(grid, ref row, "Preferred backend", _backend, null);
+        AddHint(grid, ref row, "NVTT is used when available; the managed encoder is the fallback.");
+        AddRow(grid, ref row, "Default import format", _defaultFormat, null);
+        AddRow(grid, ref row, string.Empty, _syncFlags, null, span: 2);
 
-        AddRow(table, ref row, "Preferred backend", _backend);
-        AddRow(table, ref row, "Default import format", _defaultFormat);
-        AddRow(table, ref row, "Volume preview cap", _volumeCap);
-        AddRow(table, ref row, string.Empty, _generateMips);
-        AddRow(table, ref row, string.Empty, _srgbPreview);
-        AddRow(table, ref row, string.Empty, _recompressOodle);
+        AddSection(grid, ref row, "Preview");
+        AddRow(grid, ref row, string.Empty, _srgbPreview, null, span: 2);
+        AddRow(grid, ref row, string.Empty, _opaqueAlpha, null, span: 2);
+        AddRow(grid, ref row, string.Empty, _showAlpha, null, span: 2);
+        AddRow(grid, ref row, "Volume preview cap", _volumeCap, null);
+        AddHint(grid, ref row, "Larger 3D volumes are downscaled for the GPU preview only.");
+
+        AddSection(grid, ref row, "Native tools");
+        AddRow(grid, ref row, "nvtt30205.dll", _nvttDll, MakeBrowse(_nvttDll));
+        AddRow(grid, ref row, "nvtt_export.exe", _nvttCli, MakeBrowse(_nvttCli));
+        AddHint(grid, ref row, "Leave blank to auto-detect, or point at a custom install.");
+
+        AddSection(grid, ref row, "Settings file");
+        AddHint(grid, ref row, AppSettings.SettingsPath, wrap: true);
 
         var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, AutoSize = true };
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, AutoSize = true };
@@ -79,52 +127,109 @@ public sealed class SettingsDialog : Form
         {
             Dock = DockStyle.Bottom,
             FlowDirection = FlowDirection.RightToLeft,
-            Height = 40,
-            Padding = new Padding(8),
+            Height = 44,
+            Padding = new Padding(10, 8, 10, 8),
         };
         buttons.Controls.Add(ok);
         buttons.Controls.Add(cancel);
 
-        Controls.Add(table);
+        Controls.Add(grid);
         Controls.Add(buttons);
         AcceptButton = ok;
         CancelButton = cancel;
 
-        void Commit(List<Xt1.Core.Format.FormatInfo> formatList)
+        void Commit(List<FormatInfo> formatList)
         {
-            Result.PreferredBackend = (EncoderBackend)(_backend.SelectedItem ?? EncoderBackend.Managed);
+            Result.PreferredBackend = (EncoderBackend)(_backend.SelectedItem ?? EncoderBackend.Nvtt);
             if (_defaultFormat.SelectedIndex >= 0 && _defaultFormat.SelectedIndex < formatList.Count)
                 Result.DefaultImportFormat = formatList[_defaultFormat.SelectedIndex].Format;
-            Result.GenerateMips = _generateMips.Checked;
+            Result.SyncFlagsFromFormat = _syncFlags.Checked;
             Result.ApplySrgbPreview = _srgbPreview.Checked;
-            Result.RecompressOodleOnSave = _recompressOodle.Checked;
+            Result.OpaqueAlphaByDefault = _opaqueAlpha.Checked;
+            Result.ShowAlphaChannel = _showAlpha.Checked;
             Result.VolumeResolutionCap = (int)_volumeCap.Value;
             Result.NvttDllPath = NullIfEmpty(_nvttDll.Text);
             Result.NvttCliPath = NullIfEmpty(_nvttCli.Text);
-            Result.OodlePath = NullIfEmpty(_oodle.Text);
         }
     }
 
     private static string? NullIfEmpty(string text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
-    private static void AddRow(TableLayoutPanel table, ref int row, string label, Control control)
+    private static Button MakeBrowse(TextBox box)
     {
-        table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        table.Controls.Add(new Label { Text = label, AutoSize = true, Margin = new Padding(3, 8, 3, 3) }, 0, row);
-        table.Controls.Add(control, 1, row);
-        table.SetColumnSpan(control, 2);
+        var browse = new Button { Text = "Browse...", AutoSize = true, Margin = new Padding(6, 2, 0, 2) };
+        browse.Click += (_, _) =>
+        {
+            using var dialog = new OpenFileDialog
+            {
+                Filter = "DLL / EXE (*.dll;*.exe)|*.dll;*.exe|All files (*.*)|*.*",
+                FileName = box.Text,
+            };
+            if (dialog.ShowDialog() == DialogResult.OK) box.Text = dialog.FileName;
+        };
+        return browse;
+    }
+
+    private static void AddSection(TableLayoutPanel grid, ref int row, string title)
+    {
+        var label = new Label
+        {
+            Text = title,
+            AutoSize = true,
+            Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
+            Margin = new Padding(0, row == 0 ? 0 : 14, 0, 4),
+        };
+        grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        grid.Controls.Add(label, 0, row);
+        grid.SetColumnSpan(label, 3);
         row++;
     }
 
-    private static void AddPathRow(TableLayoutPanel table, ref int row, string label, TextBox box)
+    private static void AddHint(TableLayoutPanel grid, ref int row, string text, bool wrap = false)
     {
-        var browse = new Button { Text = "…", AutoSize = true };
-        browse.Click += (_, _) =>
+        var label = new Label
         {
-            using var dialog = new OpenFileDialog { Filter = "DLL / EXE (*.dll;*.exe)|*.dll;*.exe|All files (*.*)|*.*" };
-            if (dialog.ShowDialog() == DialogResult.OK) box.Text = dialog.FileName;
+            Text = text,
+            AutoSize = !wrap,
+            ForeColor = Color.FromArgb(112, 112, 124),
+            Margin = new Padding(0, 1, 0, 4),
+            MaximumSize = wrap ? new Size(620, 0) : Size.Empty,
         };
-        AddRow(table, ref row, label, box);
-        table.Controls.Add(browse, 2, row - 1);
+        grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        grid.Controls.Add(label, 0, row);
+        grid.SetColumnSpan(label, 3);
+        row++;
+    }
+
+    /// <summary>
+    /// One settings row. The label is stretched and vertically centered so every row's label and
+    /// editor share the same baseline, which is what the earlier nested-panel version got wrong.
+    /// </summary>
+    private static void AddRow(TableLayoutPanel grid, ref int row, string label, Control control,
+        Control? extra, int span = 1)
+    {
+        grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+        var caption = new Label
+        {
+            Text = label,
+            Dock = DockStyle.Fill,
+            AutoSize = false,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0, 3, 10, 3),
+        };
+        grid.Controls.Add(caption, 0, row);
+
+        control.Margin = new Padding(0, 2, 0, 2);
+        if (control is NumericUpDown) control.Dock = DockStyle.None;
+        grid.Controls.Add(control, 1, row);
+        if (span == 2) grid.SetColumnSpan(control, 2);
+
+        if (extra is not null)
+        {
+            extra.Margin = new Padding(6, 2, 0, 2);
+            grid.Controls.Add(extra, 2, row);
+        }
+        row++;
     }
 }

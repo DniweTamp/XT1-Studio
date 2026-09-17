@@ -185,6 +185,144 @@ public class OrbitCameraTests
 
         Assert.Equal(MathF.Tan(0.45f), camera.Scale, 5);
     }
+
+    // --- cubemap look control ----------------------------------------------------------------
+
+    private static (float X, float Y, float Z) Forward(OrbitCamera camera) =>
+        Mul(camera.LookRotation(), 0f, 0f, -1f);
+
+    [Fact]
+    public void LookRotation_KeepsTheHorizonLevelForEveryYawAndPitch()
+    {
+        // The bug this guards against: Rx(pitch)*Ry(yaw) tilts the camera's right vector by
+        // sin(pitch)*sin(yaw), so the whole view rolls. The look rotation must not.
+        var camera = new OrbitCamera();
+
+        for (float yaw = -3f; yaw <= 3f; yaw += 0.23f)
+        {
+            for (float pitch = -OrbitCamera.MaxLookPitch; pitch <= OrbitCamera.MaxLookPitch; pitch += 0.17f)
+            {
+                camera.Yaw = yaw;
+                camera.Pitch = pitch;
+                var m = camera.LookRotation();
+                var right = (X: m[0], Y: m[1], Z: m[2]);
+                var up = (X: m[3], Y: m[4], Z: m[5]);
+
+                Assert.Equal(0f, right.Y, 4);      // camera right stays horizontal -> no roll
+                Assert.True(up.Y > 0f, "the horizon must never flip over");
+                Assert.Equal(1f, Length(right), 3);
+                Assert.Equal(1f, Length(up), 3);
+            }
+        }
+    }
+
+    [Fact]
+    public void LookRotation_TurnsTheViewUpAndDownWithoutChangingTheRoll()
+    {
+        var camera = new OrbitCamera { Yaw = 0.8f, Pitch = 0f };
+        var level = camera.LookRotation();
+
+        camera.Pitch = 0.6f; // look up while yawed
+        var lookingUp = camera.LookRotation();
+
+        // The right vector (roll reference) must be identical: only the view direction changed.
+        Assert.Equal(level[0], lookingUp[0], 5);
+        Assert.Equal(level[1], lookingUp[1], 5);
+        Assert.Equal(level[2], lookingUp[2], 5);
+        Assert.True(Mul(lookingUp, 0f, 0f, -1f).Y > 0f, "pitching up must raise the view direction");
+    }
+
+    [Fact]
+    public void Look_ResetPointsForwardWithALevelHorizon()
+    {
+        var camera = new OrbitCamera { Yaw = 2f, Pitch = 1.2f, Fov = 0.4f };
+
+        camera.ResetLook();
+
+        Assert.Equal(0f, camera.Yaw, 5);
+        Assert.Equal(0f, camera.Pitch, 5);
+        Assert.Equal(OrbitCamera.DefaultFov, camera.Fov, 5);
+        var forward = Forward(camera);
+        Assert.Equal(0f, forward.X, 4);
+        Assert.Equal(0f, forward.Y, 4);
+        Assert.Equal(-1f, forward.Z, 4);
+    }
+
+    [Fact]
+    public void Look_RightDragTurnsRightWithoutAnyVerticalChange()
+    {
+        var camera = new OrbitCamera { Yaw = 0f, Pitch = 0f };
+
+        camera.Look(10f, 0f); // drag right
+
+        Assert.True(camera.Yaw < 0f, "yaw must decrease so the view turns right");
+        var forward = Forward(camera);
+        Assert.True(forward.X > 0f, "turning right must move the view toward the camera's right");
+        Assert.Equal(0f, forward.Y, 5);
+    }
+
+    [Fact]
+    public void Look_UpwardDragLooksUp()
+    {
+        var camera = new OrbitCamera { Yaw = 0f, Pitch = 0f };
+
+        camera.Look(0f, -10f); // drag up
+
+        Assert.True(camera.Pitch > 0f);
+        Assert.True(Forward(camera).Y > 0f, "looking up must raise the view direction");
+    }
+
+    [Fact]
+    public void Look_ClampsPitchAndNeverRollsTheHorizon()
+    {
+        var camera = new OrbitCamera { Yaw = 0f, Pitch = 0f };
+
+        for (int i = 0; i < 400; i++) camera.Look(0f, -100f);
+        Assert.Equal(OrbitCamera.MaxLookPitch, camera.Pitch, 5);
+        Assert.True(camera.LookRotation()[4] > 0f, "the camera up vector must keep a positive Y (level horizon)");
+
+        for (int i = 0; i < 800; i++) camera.Look(0f, 100f);
+        Assert.Equal(-OrbitCamera.MaxLookPitch, camera.Pitch, 5);
+        Assert.True(camera.LookRotation()[4] > 0f, "looking down to the limit must not flip the view");
+
+        // A clear margin under 90 degrees keeps a yaw turn from becoming a roll at the pole.
+        Assert.True(OrbitCamera.MaxLookPitch < MathF.PI / 2f - 0.1f);
+    }
+
+    [Fact]
+    public void Look_YawWrapsAndHorizontalTurnStaysHorizontalNearThePitchLimit()
+    {
+        var camera = new OrbitCamera { Yaw = 0f, Pitch = OrbitCamera.MaxLookPitch };
+
+        for (int i = 0; i < 1000; i++) camera.Look(50f, 0f);
+        Assert.InRange(camera.Yaw, -MathF.PI, MathF.PI);
+
+        // At the pitch limit a yaw turn must still move the view along the camera's right axis with
+        // no up/down component: that is what "looking left/right" means.
+        camera.Yaw = 0f;
+        var before = Forward(camera);
+        camera.Look(4f, 0f);
+        var after = Forward(camera);
+        var rotation = camera.LookRotation();
+        float dx = after.X - before.X;
+        float dy = after.Y - before.Y;
+        float dz = after.Z - before.Z;
+        float alongRight = dx * rotation[0] + dy * rotation[1] + dz * rotation[2];
+        float alongUp = dx * rotation[3] + dy * rotation[4] + dz * rotation[5];
+        Assert.True(MathF.Abs(alongRight) > MathF.Abs(alongUp) * 5f);
+        Assert.False(float.IsNaN(before.X + after.X));
+    }
+
+    [Fact]
+    public void LookBy_StepsTheViewAndClampsTheSameWay()
+    {
+        var camera = new OrbitCamera { Yaw = 0f, Pitch = 0f };
+
+        camera.LookBy(0.1f, -0.1f);
+
+        Assert.Equal(0.1f, camera.Yaw, 5);
+        Assert.Equal(-0.1f, camera.Pitch, 5);
+    }
 }
 
 /// <summary>Alpha uniformity drives the automatic "show RGB instead of a blank volume" decision.</summary>

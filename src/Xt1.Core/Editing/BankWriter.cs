@@ -1,5 +1,4 @@
 using Xt1.Core.Containers;
-using Xt1.Core.Interop;
 
 namespace Xt1.Core.Editing;
 
@@ -91,15 +90,7 @@ public static class BankWriter
 
         files.Add(new OutputFile(headerPath, bankBytes));
 
-        if (options.RecompressOodle)
-        {
-            var compressed = TryCompress(payload, options, warnings);
-            if (compressed is not null)
-                files.Add(new OutputFile(payloadPath, compressed));
-            else
-                files.Add(new OutputFile(payloadPath, payload));
-        }
-        else if (options.WritePayloadSide)
+        if (options.WritePayloadSide)
         {
             files.Add(new OutputFile(payloadPath, payload));
         }
@@ -140,33 +131,8 @@ public static class BankWriter
         if (document.PayloadDat is not null && options.WritePayloadSide)
         {
             var payloadPath = ResolvePayloadPath(document, options);
-            var bytes = document.PayloadDat.ToBytes();
-            if (options.RecompressOodle)
-            {
-                var compressed = TryCompress(bytes, options, warnings);
-                files.Add(new OutputFile(payloadPath, compressed ?? bytes));
-            }
-            else
-            {
-                files.Add(new OutputFile(payloadPath, bytes));
-            }
+            files.Add(new OutputFile(payloadPath, document.PayloadDat.ToBytes()));
         }
-    }
-
-    private static byte[]? TryCompress(byte[] data, WriteOptions options, List<string> warnings)
-    {
-        using var oodle = OodleCodec.TryCreate(out var error, options.OodlePath);
-        if (oodle is null)
-        {
-            warnings.Add($"Oodle unavailable ({error}); payload written uncompressed");
-            return null;
-        }
-        if (!oodle.SupportsCompression)
-        {
-            warnings.Add("this oo2core build is decompress-only; payload written uncompressed");
-            return null;
-        }
-        return oodle.Compress(data);
     }
 
     private static string ResolveHeaderPath(BankDocument document, WriteOptions options)

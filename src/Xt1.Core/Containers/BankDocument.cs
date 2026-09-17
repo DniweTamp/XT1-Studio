@@ -36,14 +36,8 @@ public sealed class BankSection
     public int WtaIndex { get; init; } = -1;
     public int WtpIndex { get; init; } = -1;
 
-    /// <summary>Decompressed payload stream (table0 is relative to this for split banks).</summary>
+    /// <summary>Payload stream (table0 is relative to this for split banks).</summary>
     public byte[] PayloadStream { get; set; } = Array.Empty<byte>();
-
-    /// <summary>True when the payload stream on disk is Oodle-compressed.</summary>
-    public bool PayloadIsOodle { get; set; }
-
-    /// <summary>The original compressed payload bytes (for pass-through when unmodified).</summary>
-    public byte[]? CompressedPayload { get; set; }
 
     public override string ToString() => $"{Label} ({Bank.Count} textures)";
 }
@@ -87,7 +81,7 @@ public sealed class BankDocument
 
     public IEnumerable<EditableTexture> AllTextures => Sections.SelectMany(s => s.Bank.Textures);
 
-    public static BankDocument Load(string path, string? oodlePath = null, string? oodleDirectory = null)
+    public static BankDocument Load(string path)
     {
         if (!File.Exists(path))
             throw new FileNotFoundException("bank file not found", path);
@@ -106,7 +100,7 @@ public sealed class BankDocument
 
         if (DatFile.HasMagic(bytes))
         {
-            document.LoadDat(path, bytes, oodlePath);
+            document.LoadDat(path, bytes);
             return document;
         }
 
@@ -115,10 +109,12 @@ public sealed class BankDocument
             document.HeaderSidePath = path;
 
             // A raw WTB file is either a standalone `.wtb` (payload inline) or the `.wta` half of
-            // an effect bank whose payload lives in the sibling `.wtp`.
+            // an effect bank whose payload lives in the sibling `.wtp`. The extension decides which:
+            // an empty standalone bank has no table0 offset to infer it from.
+            bool standaloneByExtension = path.EndsWith(".wtb", StringComparison.OrdinalIgnoreCase);
             var wtpPath = Path.ChangeExtension(path, ".wtp");
             byte[]? payloadStream = null;
-            if (File.Exists(wtpPath))
+            if (!standaloneByExtension && File.Exists(wtpPath))
             {
                 try
                 {
@@ -132,6 +128,7 @@ public sealed class BankDocument
             }
 
             var bank = WtbBank.Parse(bytes, payloadStream);
+            if (standaloneByExtension) bank.IsStandalone = true;
             document.Kind = bank.IsStandalone ? BankKind.StandaloneWtb : BankKind.EffectWta;
 
             var section = new BankSection
@@ -159,42 +156,46 @@ public sealed class BankDocument
             return document;
         }
 
-        // Last resort: try Oodle (a packed pkz payload dropped in directly).
-        var oodle = OodleCodec.TryCreate(out var error, oodlePath);
-        if (oodle is not null)
-        {
-            using (oodle)
-            {
-                foreach (var guess in new[] { bytes.Length * 4, bytes.Length * 8, bytes.Length * 16 })
-                {
-                    try
-                    {
-                        var expanded = oodle.Decompress(bytes, guess);
-                        if (WtbBank.HasMagic(expanded))
-                        {
-                            document.Kind = BankKind.StandaloneWtb;
-                            var bank = WtbBank.Parse(expanded);
-                            document.Sections.Add(new BankSection
-                            {
-                                Label = Path.GetFileName(path),
-                                Bank = bank,
-                                PayloadStream = bank.InlinePayload ?? Array.Empty<byte>(),
-                            });
-                            return document;
-                        }
-                    }
-                    catch
-                    {
-                    }
-                }
-            }
-        }
-
-        throw new InvalidDataException(
-            $"unrecognized file: not DAT / WTB / XT1{(error is null ? string.Empty : $" ({error})")}");
+        throw new InvalidDataException("unrecognized file: not DAT / WTB / XT1");
     }
 
-    private void LoadDat(string path, byte[] bytes, string? oodlePath)
+    /// <summary>
+    /// Author a brand-new empty bank. Effect banks are a `.wta` header with a matching `.wtp`
+    /// payload stream; a standalone is a single `.wtb` with its payload inline. DAT containers are
+    /// not authored here (the user can still open and edit existing ones).
+    /// </summary>
+    public static BankDocument CreateEmpty(BankKind kind, string headerPath)
+    {
+        var document = new BankDocument { Kind = kind, FilePath = headerPath, HeaderSidePath = headerPath };
+
+        WtbBank bank;
+        string label;
+        switch (kind)
+        {
+            case BankKind.EffectWta:
+                bank = WtbBank.CreateEmpty(includeTable3: false, standalone: false, payloadBase: 0);
+                label = "wta";
+                document.PayloadSidePath = Path.ChangeExtension(headerPath, ".wtp");
+                break;
+            case BankKind.StandaloneWtb:
+                bank = WtbBank.CreateEmpty(includeTable3: true, standalone: true,
+                    payloadBase: StandaloneWtbWriter.PayloadBase);
+                label = "wtb";
+                break;
+            default:
+                throw new NotSupportedException($"cannot author a new {kind} document");
+        }
+
+        document.Sections.Add(new BankSection
+        {
+            Label = label,
+            Bank = bank,
+            PayloadStream = Array.Empty<byte>(),
+        });
+        return document;
+    }
+
+    private void LoadDat(string path, byte[] bytes)
     {
         HeaderDat = DatFile.Parse(bytes);
         Kind = BankKind.ModelDat;

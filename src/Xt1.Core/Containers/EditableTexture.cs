@@ -169,8 +169,8 @@ public sealed class EditableTexture
     /// <summary>
     /// Bit 0x08, kept under its original name because it is a stored bit rather than a behavior.
     /// It was first read as "second-layer compressed", but per XT1_FORMAT.md section 4 it tracks the
-    /// 0x01 ("af") single-channel format, whose payloads are uncompressed. It is not an Oodle flag
-    /// (Oodle is a property of the container sub-file), so the UI does not offer it as a toggle.
+    /// 0x01 ("af") single-channel format, whose payloads are uncompressed; the UI does not offer it
+    /// as a toggle.
     /// </summary>
     public bool IsCompressedFlag => (Table2B3 & 0x08) != 0;
 

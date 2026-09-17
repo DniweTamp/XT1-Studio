@@ -2,7 +2,6 @@
 using Xt1.Core.Containers;
 using Xt1.Core.Format;
 using Xt1.Core.Imaging;
-using Xt1.Core.Settings;
 using Xt1.Core.Xt1;
 using Xt1.Core.Util;
 
@@ -41,8 +40,7 @@ internal static class DecodeExport
         bool all = args.Contains("--all");
         bool scan = args.Contains("--scan-layouts");
 
-        var settings = AppSettings.Load();
-        var document = BankDocument.Load(file, settings.Resolve().Oodle);
+        var document = BankDocument.Load(file);
 
         var candidates = new List<(BankSection Section, EditableTexture Texture)>();
         foreach (var section in document.Sections)

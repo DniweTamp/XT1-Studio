@@ -228,6 +228,98 @@ public static class TextureCodec
         return image;
     }
 
+    /// <summary>True when the format decodes to linear float data that should be tone mapped.</summary>
+    public static bool IsHdr(FormatInfo? format) =>
+        format is not null &&
+        ManagedFormatMap.TryGetDecodeFormat(format, out var compression) &&
+        compression == CompressionFormat.Bc6U;
+
+    /// <summary>
+    /// Decode a linear block array to unclamped linear float (HDR). Only formats with an HDR
+    /// decoder (BC6H) are supported; other formats return null so the caller uses the 8-bit path.
+    /// </summary>
+    public static FloatImage? DecodeLinearHdr(byte[] linear, int width, int height, FormatInfo format,
+        out string? error)
+    {
+        error = null;
+        if (width <= 0 || height <= 0)
+        {
+            error = "invalid dimensions";
+            return null;
+        }
+
+        if (!ManagedFormatMap.TryGetDecodeFormat(format, out var compression) ||
+            compression != CompressionFormat.Bc6U)
+        {
+            error = "format has no HDR decoder";
+            return null;
+        }
+
+        try
+        {
+            var hdr = BcDecoder.DecodeRawHdr(linear, width, height, compression);
+            var image = new FloatImage(width, height);
+            for (int i = 0; i < width * height && i < hdr.Length; i++)
+            {
+                image.Pixels[i * 4 + 0] = hdr[i].r;
+                image.Pixels[i * 4 + 1] = hdr[i].g;
+                image.Pixels[i * 4 + 2] = hdr[i].b;
+                image.Pixels[i * 4 + 3] = 1f;
+            }
+            return image;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return null;
+        }
+    }
+
+    /// <summary>Decode one subresource as linear float, or null when the format is not HDR.</summary>
+    public static FloatImage? DecodeHdr(EditableTexture texture, int mip, int face, int slice, out string? error)
+    {
+        var format = texture.FormatInfo;
+        if (format is null)
+        {
+            error = "unknown format";
+            return null;
+        }
+
+        var linear = ExtractLinearBlocks(texture, mip, face, slice, out var info, out var warning);
+        if (info is null)
+        {
+            error = warning;
+            return null;
+        }
+
+        var image = DecodeLinearHdr(linear, info.Width, info.Height, format, out error);
+        if (image is not null) error = warning;
+        return image;
+    }
+
+    public static IReadOnlyList<FloatImage> DecodeCubeFacesHdr(EditableTexture texture, int mip, out string? error)
+    {
+        var faces = new List<FloatImage>(6);
+        error = null;
+        if (!IsHdr(texture.FormatInfo))
+        {
+            error = "format is not HDR";
+            return faces;
+        }
+
+        for (int face = 0; face < 6; face++)
+        {
+            var image = DecodeHdr(texture, mip, face, 0, out var faceError);
+            if (image is null)
+            {
+                error = $"face {face}: {faceError}";
+                return faces;
+            }
+            faces.Add(image);
+        }
+        return faces;
+    }
+
     public static IReadOnlyList<RgbaImage> DecodeCubeFaces(EditableTexture texture, int mip, out string? error)
     {
         var faces = new List<RgbaImage>(6);

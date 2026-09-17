@@ -1,4 +1,4 @@
-﻿using Xt1.App.Controls;
+using Xt1.App.Controls;
 using Xt1.App.Rendering;
 using Xt1.App.Services;
 using Xt1.Core.Codecs;
@@ -19,13 +19,13 @@ public sealed class MainForm : Form
 {
     private readonly AppSettings _settings;
     private ResolvedTools _tools;
-    private OodleCodec? _oodle;
     private NvttNative? _nvttNative;
     private NvttEncoder? _nvttEncoder;
     private CliEncoder? _cliEncoder;
     private readonly DecodeCache _cache = new();
     private readonly EditHistory _history = new();
-    private BatchConverter _batchConverter = null!;
+    private EncoderPicker _encoders = null!;
+    private BatchRecompressor _recompressor = null!;
     private CancellationTokenSource? _volumeCts;
     private CancellationTokenSource? _exportCts;
     private bool _syncingSlices;
@@ -53,7 +53,6 @@ public sealed class MainForm : Form
     private EditableTexture? _rawTexture;
 
     private bool _suppressTreeEvents;
-    private bool _suppressSectionCombo;
 
     private readonly TreeView _tree = new() { Dock = DockStyle.Fill, HideSelection = false };
     private readonly Image2DViewer _imageViewer = new() { Dock = DockStyle.Fill };
@@ -63,12 +62,19 @@ public sealed class MainForm : Form
     private readonly HexEditorControl _hexPanel = new() { Dock = DockStyle.Fill };
     private Form? _hexDialog;
     private readonly ContextMenuStrip _treeMenu = new();
+    private ToolStripMenuItem _menuReplace = null!;
+    private ToolStripMenuItem _menuReplaceXt1 = null!;
+    private ToolStripMenuItem _menuExportGroup = null!;
+    private ToolStripMenuItem _menuExportPng = null!;
+    private ToolStripMenuItem _menuExportDds = null!;
+    private ToolStripMenuItem _menuExportXt1 = null!;
+    private ToolStripMenuItem _menuAddTexture = null!;
+    private ToolStripMenuItem _menuDeleteTexture = null!;
+    private ToolStripMenuItem _menuCopyHash = null!;
+    private ToolStripMenuItem _menuExportBank = null!;
     private readonly ToolStripStatusLabel _statusLabel = new("Ready");
     private readonly ToolStripStatusLabel _backendLabel = new(string.Empty);
-    private readonly ToolStripStatusLabel _oodleLabel = new(string.Empty);
     private readonly ToolStripComboBox _backendCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
-    private readonly ToolStripLabel _sectionLabel = new("Bank") { Visible = false };
-    private readonly ToolStripComboBox _sectionCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 150, Visible = false };
     private readonly ToolStripComboBox _mipCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 110 };
     private readonly ToolStripComboBox _channelCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 80 };
     private readonly ToolStripButton _undoButton = new("Undo");
@@ -79,6 +85,16 @@ public sealed class MainForm : Form
     private readonly CheckBox _showSlices = new() { Text = "Slice planes", AutoSize = true, Checked = false, Visible = false };
     private readonly Label _volumeLabel = new() { Text = "Render", AutoSize = true, Visible = false };
     private readonly ComboBox _volumeMode = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 70, Visible = false };
+    private readonly Label _gammaLabel = new() { Text = "Gamma", AutoSize = true };
+    private readonly NumericUpDown _gammaBox = new()
+    {
+        DecimalPlaces = 2, Minimum = 0.10m, Maximum = 8.00m, Increment = 0.05m, Value = 1.00m, Width = 60,
+    };
+    private readonly Label _exposureLabel = new() { Text = "Exposure", AutoSize = true };
+    private readonly NumericUpDown _exposureBox = new()
+    {
+        DecimalPlaces = 2, Minimum = 0.05m, Maximum = 20.00m, Increment = 0.05m, Value = 1.00m, Width = 60,
+    };
     private ToolStripButton? _opaqueButton;
     private bool _syncingVolumeMode;
 
@@ -121,13 +137,22 @@ public sealed class MainForm : Form
         _history.Changed += () => UpdateHistoryButtons();
         _backendCombo.SelectedIndexChanged += (_, _) => OnBackendChanged();
         _mipCombo.SelectedIndexChanged += (_, _) => UpdatePreview();
-        _sectionCombo.SelectedIndexChanged += (_, _) => OnSectionComboChanged();
         _sliceCombo.SelectedIndexChanged += (_, _) => SyncSliceFromCombo();
         _channelCombo.SelectedIndexChanged += (_, _) =>
         {
             var channel = (ImageChannelMode)Math.Max(0, _channelCombo.SelectedIndex);
             _imageViewer.Channel = channel;
             _glPreview.Channel = channel;
+            _glPreview.Invalidate();
+        };
+        _gammaBox.ValueChanged += (_, _) =>
+        {
+            _glPreview.Gamma = (float)_gammaBox.Value;
+            _glPreview.Invalidate();
+        };
+        _exposureBox.ValueChanged += (_, _) =>
+        {
+            _glPreview.Exposure = (float)_exposureBox.Value;
             _glPreview.Invalidate();
         };
         _sliceTrack.ValueChanged += (_, _) => SyncSliceFromTrack();
@@ -157,6 +182,7 @@ public sealed class MainForm : Form
 
         var file = new ToolStripMenuItem("&File");
         file.DropDownItems.Add("&Open...", null, (_, _) => OpenFile());
+        file.DropDownItems.Add("&New empty bank...", null, (_, _) => NewBank());
         file.DropDownItems.Add("&Reload", null, (_, _) => { if (_document?.FilePath is { } p) LoadFile(p); });
         file.DropDownItems.Add(new ToolStripSeparator());
         file.DropDownItems.Add("&Save", null, (_, _) => SaveDocument(false));
@@ -175,8 +201,7 @@ public sealed class MainForm : Form
 
         var tools = new ToolStripMenuItem("&Tools");
         tools.DropDownItems.Add("&Settings...", null, (_, _) => ShowSettings());
-        tools.DropDownItems.Add("&Batch build...", null, (_, _) => ShowBatchBuild());
-        tools.DropDownItems.Add("&Validate bank", null, (_, _) => ValidateDocument());
+        tools.DropDownItems.Add("&Batch recompress (ASTC to BC)...", null, (_, _) => ShowBatchRecompress());
 
         var help = new ToolStripMenuItem("&Help");
         help.DropDownItems.Add("&About", null, (_, _) => MessageBox.Show(this,
@@ -198,26 +223,34 @@ public sealed class MainForm : Form
     /// </summary>
     private void BuildTreeMenu()
     {
-        _treeMenu.Items.Add(NewTreeMenuItem("Import image / DDS (replace)...", (_, _) => ImportTexture()));
-        _treeMenu.Items.Add(NewTreeMenuItem("Replace raw payload...", (_, _) => ReplaceRawPayload()));
+        _menuReplace = NewTreeMenuItem("Replace...", (_, _) => ImportTexture());
+        _menuReplaceXt1 = NewTreeMenuItem("Replace with .xt1...", (_, _) => ReplaceRawPayload());
+
+        _menuExportPng = NewTreeMenuItem("Export .png...", (_, _) => ExportPng());
+        _menuExportDds = NewTreeMenuItem("Export .dds...", (_, _) => ExportDds());
+        _menuExportXt1 = NewTreeMenuItem("Export .xt1...", (_, _) => ExportRawXt1());
+        _menuExportGroup = new ToolStripMenuItem("Export");
+        _menuExportGroup.DropDownItems.Add(_menuExportPng);
+        _menuExportGroup.DropDownItems.Add(_menuExportDds);
+        _menuExportGroup.DropDownItems.Add(_menuExportXt1);
+
+        _menuAddTexture = NewTreeMenuItem("Add texture from image...", (_, _) => AddTexture());
+        _menuDeleteTexture = NewTreeMenuItem("Delete texture", (_, _) => DeleteTexture());
+        _menuCopyHash = NewTreeMenuItem("Copy hash", (_, _) => CopySelectedHash());
+        _menuExportBank = NewTreeMenuItem("Export every texture in this bank (PNG folder)...",
+            (_, _) => ExportBankTextures());
+
+        _treeMenu.Items.Add(_menuReplace);
+        _treeMenu.Items.Add(_menuReplaceXt1);
         _treeMenu.Items.Add(new ToolStripSeparator());
-        _treeMenu.Items.Add(NewTreeMenuItem("Export PNG...", (_, _) => ExportPng()));
-        _treeMenu.Items.Add(NewTreeMenuItem("Export all mips...", (_, _) => ExportAllMips()));
-        _treeMenu.Items.Add(NewTreeMenuItem("Export DDS...", (_, _) => ExportDds()));
-        _treeMenu.Items.Add(NewTreeMenuItem("Export raw XT1...", (_, _) => ExportRawXt1()));
+        _treeMenu.Items.Add(_menuExportGroup);
         _treeMenu.Items.Add(new ToolStripSeparator());
-        _treeMenu.Items.Add(NewTreeMenuItem("Add texture from image...", (_, _) => AddTexture()));
-        _treeMenu.Items.Add(NewTreeMenuItem("Delete texture", (_, _) => DeleteTexture()));
+        _treeMenu.Items.Add(_menuAddTexture);
+        _treeMenu.Items.Add(_menuDeleteTexture);
         _treeMenu.Items.Add(new ToolStripSeparator());
-        _treeMenu.Items.Add(NewTreeMenuItem("Recompute image size", (_, _) => RecomputeSelectedImageSize()));
-        _treeMenu.Items.Add(NewTreeMenuItem("Copy hash", (_, _) => CopySelectedHash()));
-        _treeMenu.Items.Add(NewTreeMenuItem("Validate this texture...", (_, _) => ValidateSelectedTexture()));
+        _treeMenu.Items.Add(_menuCopyHash);
         _treeMenu.Items.Add(new ToolStripSeparator());
-        _treeMenu.Items.Add(NewTreeMenuItem("Export every texture in this bank (PNG folder)...",
-            (_, _) => ExportBankTextures()));
-        _treeMenu.Items.Add(NewTreeMenuItem("Batch force table2 byte...", (_, _) => BatchForceTable2()));
-        _treeMenu.Items.Add(NewTreeMenuItem("Batch force textureFlag...", (_, _) => BatchForceTextureFlag()));
-        _treeMenu.Items.Add(NewTreeMenuItem("Validate bank", (_, _) => ValidateDocument()));
+        _treeMenu.Items.Add(_menuExportBank);
 
         _treeMenu.Opening += (_, _) => UpdateTreeMenuState();
 
@@ -249,30 +282,16 @@ public sealed class MainForm : Form
         bool canExportDds = info is not null && DdsIo.CanExport(info);
         bool inBank = _section is not null && _section.Bank.Textures.Count > 0;
 
-        // Item order matches BuildTreeMenu.
-        SetTreeItemState(0, hasTexture, "Import image / DDS (replace)");
-        SetTreeItemState(1, hasTexture);
-        SetTreeItemState(3, hasTexture && canDecode);
-        SetTreeItemState(4, hasTexture && canDecode);
-        SetTreeItemState(5, hasTexture && canExportDds);
-        SetTreeItemState(6, hasTexture);
-        SetTreeItemState(8, inBank);
-        SetTreeItemState(9, inBank);
-        SetTreeItemState(11, hasTexture);
-        SetTreeItemState(12, hasTexture);
-        SetTreeItemState(13, hasTexture);
-        SetTreeItemState(15, inBank);
-        SetTreeItemState(16, inBank);
-        SetTreeItemState(17, inBank);
-        SetTreeItemState(18, _document is not null);
-    }
-
-    private void SetTreeItemState(int index, bool enabled, string? tooltip = null)
-    {
-        if (index < 0 || index >= _treeMenu.Items.Count) return;
-        var item = _treeMenu.Items[index];
-        item.Enabled = enabled;
-        if (enabled && tooltip is not null) item.ToolTipText = tooltip;
+        _menuReplace.Enabled = hasTexture;
+        _menuReplaceXt1.Enabled = hasTexture;
+        _menuExportGroup.Enabled = hasTexture;
+        _menuExportPng.Enabled = hasTexture && canDecode;
+        _menuExportDds.Enabled = hasTexture && canExportDds;
+        _menuExportXt1.Enabled = hasTexture;
+        _menuAddTexture.Enabled = inBank;
+        _menuDeleteTexture.Enabled = hasTexture && inBank;
+        _menuCopyHash.Enabled = hasTexture;
+        _menuExportBank.Enabled = inBank;
     }
 
     private void BuildToolbar()
@@ -280,15 +299,10 @@ public sealed class MainForm : Form
         var strip = new ToolStrip { GripStyle = ToolStripGripStyle.Hidden };
 
 
-        _backendCombo.Items.AddRange(new object[] { EncoderBackend.Managed, EncoderBackend.Nvtt, EncoderBackend.Cli });
+        _backendCombo.Items.AddRange(new object[] { EncoderBackend.Nvtt, EncoderBackend.Managed, EncoderBackend.Cli });
         _backendCombo.SelectedItem = _settings.PreferredBackend;
         strip.Items.Add(new ToolStripLabel("Backend"));
         strip.Items.Add(_backendCombo);
-        strip.Items.Add(new ToolStripSeparator());
-
-        // Bank selector: shown only for containers that hold more than one "wta" sub-file.
-        strip.Items.Add(_sectionLabel);
-        strip.Items.Add(_sectionCombo);
         strip.Items.Add(new ToolStripSeparator());
 
         strip.Items.Add(new ToolStripLabel("Mip"));
@@ -302,12 +316,12 @@ public sealed class MainForm : Form
         strip.Items.Add(_channelCombo);
         strip.Items.Add(new ToolStripSeparator());
 
-        var gamma = new ToolStripButton("Gamma") { CheckOnClick = true, Checked = _settings.ApplySrgbPreview };
+        var gamma = new ToolStripButton("Gamma Correct") { CheckOnClick = true, Checked = _settings.ApplySrgbPreview };
         gamma.CheckedChanged += (_, _) => _imageViewer.ApplyGamma = gamma.Checked;
         strip.Items.Add(gamma);
         _imageViewer.ApplyGamma = gamma.Checked;
 
-        var opaque = new ToolStripButton("Opaque a")
+        var opaque = new ToolStripButton("Opaque Preview")
         {
             CheckOnClick = true,
             Checked = _settings.OpaqueAlphaByDefault,
@@ -316,17 +330,20 @@ public sealed class MainForm : Form
         opaque.CheckedChanged += (_, _) =>
         {
             _imageViewer.OpaqueAlpha = opaque.Checked;
+            _glPreview.OpaqueAlpha = opaque.Checked;
+            _glPreview.Invalidate();
             SyncVolumeModeFromOpaqueButton();
         };
         strip.Items.Add(opaque);
         _opaqueButton = opaque;
         _imageViewer.OpaqueAlpha = opaque.Checked;
+        _glPreview.OpaqueAlpha = opaque.Checked;
 
         // The 3D render mode follows the same opaque setting; MIP ignores alpha entirely.
         _volumeMode.SelectedIndex = opaque.Checked ? VolumeModeRgb : VolumeModeAlpha;
         ApplyVolumeMode();
 
-        strip.Items.Add(new ToolStripButton("Fit", null, (_, _) => _imageViewer.FitToWindow()));
+        strip.Items.Add(new ToolStripButton("Fit to view", null, (_, _) => _imageViewer.FitToWindow()));
         strip.Items.Add(new ToolStripSeparator());
 
         strip.Items.Add(_undoButton);
@@ -354,13 +371,44 @@ public sealed class MainForm : Form
         _volumeMode.Location = new Point(336, 4);
         _showSlices.Location = new Point(414, 7);
 
+        // Gamma/exposure are pinned to the right edge in their own flow panel so a narrower viewport
+        // can never push the GL surface over them.
+        var adjustments = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            FlowDirection = FlowDirection.LeftToRight,
+            Margin = new Padding(0),
+        };
+        _gammaLabel.Margin = new Padding(0, 6, 4, 0);
+        _gammaBox.Margin = new Padding(0, 3, 14, 0);
+        _exposureLabel.Margin = new Padding(0, 6, 4, 0);
+        _exposureBox.Margin = new Padding(0, 3, 0, 0);
+        adjustments.Controls.Add(_gammaLabel);
+        adjustments.Controls.Add(_gammaBox);
+        adjustments.Controls.Add(_exposureLabel);
+        adjustments.Controls.Add(_exposureBox);
+
         panel.Controls.Add(_sliceLabel);
         panel.Controls.Add(_sliceCombo);
         panel.Controls.Add(_sliceTrack);
         panel.Controls.Add(_volumeLabel);
         panel.Controls.Add(_volumeMode);
         panel.Controls.Add(_showSlices);
+        panel.Controls.Add(adjustments);
+        adjustments.BringToFront();
+
+        void AnchorAdjustments()
+        {
+            adjustments.Location = new Point(Math.Max(0, panel.ClientSize.Width - adjustments.Width - 8), 4);
+        }
+        panel.Resize += (_, _) => AnchorAdjustments();
+        AnchorAdjustments();
+
         _glPreview.ShowSlices = _showSlices.Checked;
+        _glPreview.Gamma = (float)_gammaBox.Value;
+        _glPreview.Exposure = (float)_exposureBox.Value;
         return panel;
     }
 
@@ -400,7 +448,6 @@ public sealed class MainForm : Form
         _statusLabel.TextAlign = ContentAlignment.MiddleLeft;
         status.Items.Add(_statusLabel);
         status.Items.Add(_backendLabel);
-        status.Items.Add(_oodleLabel);
 
         Controls.Add(outer);
         Controls.Add(status);
@@ -412,9 +459,6 @@ public sealed class MainForm : Form
     {
         _tools = _settings.Resolve();
 
-        _oodle = OodleCodec.TryCreate(out _, _tools.Oodle);
-        _oodleLabel.Text = _oodle is null ? "Oodle: missing (raw payloads only)" : "Oodle: ready";
-
         if (_tools.NvttDll is not null)
         {
             _nvttNative = NvttNative.TryCreate(out _, _tools.NvttDll);
@@ -423,7 +467,8 @@ public sealed class MainForm : Form
         if (_tools.NvttCli is not null)
             _cliEncoder = CliEncoder.TryCreate(out _, _tools.NvttCli);
 
-        _batchConverter = new BatchConverter(_settings, _nvttEncoder, _cliEncoder);
+        _encoders = new EncoderPicker(_nvttEncoder, _cliEncoder);
+        _recompressor = new BatchRecompressor(_encoders);
         UpdateBackendLabel();
     }
 
@@ -458,24 +503,13 @@ public sealed class MainForm : Form
         try
         {
             Cursor = Cursors.WaitCursor;
-            _document = BankDocument.Load(path, _tools.Oodle);
-            _history.Clear();
-            _cache.Clear();
+            AdoptDocument(BankDocument.Load(path));
             _settings.LastDirectory = Path.GetDirectoryName(path);
             _settings.Save();
 
-            _rawTexture = _document.RawXt1 is { } raw ? EditableTexture.FromRaw(raw) : null;
-            _section = _document.Sections.FirstOrDefault();
-            _texture = _section?.Bank.Textures.FirstOrDefault() ?? _rawTexture;
-            RebuildTree();
-            SelectTexture(_texture);
-
-            var warnings = new List<string>(_document.Warnings);
-            if (_oodle is null)
-                warnings.Add("Oodle is not available: packed payloads cannot be read or written.");
-            SetStatus(warnings.Count == 0
+            SetStatus(_document!.Warnings.Count == 0
                 ? $"Loaded {_document.DisplayName}"
-                : $"Loaded {_document.DisplayName} - {string.Join("; ", warnings)}");
+                : $"Loaded {_document.DisplayName} - {string.Join("; ", _document.Warnings)}");
         }
         catch (Exception ex)
         {
@@ -484,6 +518,50 @@ public sealed class MainForm : Form
         finally
         {
             Cursor = Cursors.Default;
+        }
+    }
+
+    /// <summary>Make a freshly loaded or created document the active one and rebuild the UI around it.</summary>
+    private void AdoptDocument(BankDocument document)
+    {
+        _document = document;
+        _history.Clear();
+        _cache.Clear();
+        _rawTexture = _document.RawXt1 is { } raw ? EditableTexture.FromRaw(raw) : null;
+        _section = _document.Sections.FirstOrDefault();
+        _texture = _section?.Bank.Textures.FirstOrDefault() ?? _rawTexture;
+        RebuildTree();
+        SelectTexture(_texture);
+    }
+
+    /// <summary>Author a new empty `.wta`+`.wtp` or standalone `.wtb` bank, then edit it normally.</summary>
+    private void NewBank()
+    {
+        using var dialog = new NewBankDialog();
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+
+        using var save = new SaveFileDialog
+        {
+            Title = "Choose the new bank file",
+            Filter = dialog.Standalone
+                ? "Standalone WTB (*.wtb)|*.wtb"
+                : "Effect bank (*.wta)|*.wta",
+            FileName = dialog.Standalone ? "new.wtb" : "new.wta",
+            InitialDirectory = _settings.LastDirectory ?? Environment.CurrentDirectory,
+        };
+        if (save.ShowDialog(this) != DialogResult.OK) return;
+
+        try
+        {
+            var kind = dialog.Standalone ? BankKind.StandaloneWtb : BankKind.EffectWta;
+            AdoptDocument(BankDocument.CreateEmpty(kind, save.FileName));
+            _settings.LastDirectory = Path.GetDirectoryName(save.FileName);
+            _settings.Save();
+            SetStatus($"New empty {(dialog.Standalone ? "WTB" : "WTA")} bank - add textures from the tree menu, then Save.");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Could not create the bank", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
@@ -505,7 +583,6 @@ public sealed class MainForm : Form
 
         _tree.EndUpdate();
         _suppressTreeEvents = false;
-        PopulateSectionCombo();
     }
 
     private void AddOutlineChildren(TreeNode parent, BankOutlineNode node)
@@ -524,71 +601,6 @@ public sealed class MainForm : Form
             };
             parent.Nodes.Add(treeNode);
             AddOutlineChildren(treeNode, child);
-        }
-    }
-
-    /// <summary>Show and fill the bank selector; it is only useful for multi-bank containers.</summary>
-    private void PopulateSectionCombo()
-    {
-        _suppressSectionCombo = true;
-        try
-        {
-            _sectionCombo.Items.Clear();
-
-            var labels = _document is null
-                ? Array.Empty<string>()
-                : BankOutline.SelectorLabels(_document);
-
-            if (labels.Count == 0)
-            {
-                _sectionLabel.Visible = false;
-                _sectionCombo.Visible = false;
-                return;
-            }
-
-            foreach (var label in labels) _sectionCombo.Items.Add(label);
-
-            _sectionLabel.Visible = true;
-            _sectionCombo.Visible = true;
-
-            int index = _section is null || _document is null ? -1 : _document.Sections.IndexOf(_section);
-            _sectionCombo.SelectedIndex = index >= 0 ? index : 0;
-        }
-        finally
-        {
-            _suppressSectionCombo = false;
-        }
-    }
-
-    private void OnSectionComboChanged()
-    {
-        if (_suppressSectionCombo || _document is null) return;
-        int index = _sectionCombo.SelectedIndex;
-        if (index < 0 || index >= _document.Sections.Count) return;
-
-        var section = _document.Sections[index];
-        _section = section;
-        _texture = section.Bank.Textures.FirstOrDefault();
-        SelectTexture(_texture);
-
-        // Mirror the pick in the tree without re-entering the selection handler.
-        foreach (TreeNode root in _tree.Nodes)
-        {
-            foreach (TreeNode node in root.Nodes)
-            {
-                if (!ReferenceEquals(node.Tag, section)) continue;
-                _suppressTreeEvents = true;
-                try
-                {
-                    _tree.SelectedNode = node;
-                    node.EnsureVisible();
-                }
-                finally
-                {
-                    _suppressTreeEvents = false;
-                }
-                return;
-            }
         }
     }
 
@@ -624,7 +636,6 @@ public sealed class MainForm : Form
         UpdateInspectorValidation();
         UpdateSliceControls();
         UpdateHistoryButtons();
-        SyncSectionCombo();
     }
 
     /// <summary>
@@ -665,25 +676,6 @@ public sealed class MainForm : Form
         }
 
         _inspector.SetValidation(warnings, decodeError);
-    }
-
-    /// <summary>Keep the bank selector in step with the tree selection.</summary>
-    private void SyncSectionCombo()
-    {
-        if (_document is null || _document.Sections.Count <= 1 || _section is null) return;
-
-        int index = _document.Sections.IndexOf(_section);
-        if (index < 0 || _sectionCombo.SelectedIndex == index) return;
-
-        _suppressSectionCombo = true;
-        try
-        {
-            _sectionCombo.SelectedIndex = index;
-        }
-        finally
-        {
-            _suppressSectionCombo = false;
-        }
     }
 
     /// <summary>Raw `.xt1` edits live on the preview wrapper; push them back before serializing.</summary>
@@ -892,12 +884,16 @@ public sealed class MainForm : Form
 
         if (type.IsCube())
         {
-            var faces = DecodeCubeFaces(mip);
-            if (faces is { Count: 6 })
+            // HDR faces go to the GPU as floats so the exposure control works on the real values;
+            // everything else uses the 8-bit path.
+            var hdrFaces = TextureCodec.IsHdr(_texture.FormatInfo) ? DecodeCubeFacesHdr(mip) : null;
+            var faces = hdrFaces is { Count: 6 } ? null : DecodeCubeFaces(mip);
+            if (hdrFaces is { Count: 6 } || faces is { Count: 6 })
             {
-                _glPreview.SetCubeFaces(faces);
+                if (hdrFaces is { Count: 6 }) _glPreview.SetCubeFacesHdr(hdrFaces);
+                else _glPreview.SetCubeFaces(faces!);
                 _viewTabs.SelectedIndex = 1;
-                SetStatus($"Cubemap mip {mip} ready - drag to orbit, wheel to zoom.");
+                SetStatus($"Cubemap mip {mip} ready - drag or arrow keys to look, wheel to zoom, Home/double-click to reset.");
             }
             else
             {
@@ -1106,6 +1102,13 @@ public sealed class MainForm : Form
         return faces;
     }
 
+    private IReadOnlyList<FloatImage>? DecodeCubeFacesHdr(int mip)
+    {
+        if (_texture is null) return null;
+        var faces = TextureCodec.DecodeCubeFacesHdr(_texture, mip, out _);
+        return faces.Count == 6 ? faces : null;
+    }
+
     private RgbaImage? DecodeSubresource(int mip, int face, int slice, out string? error)
     {
         error = null;
@@ -1142,8 +1145,6 @@ public sealed class MainForm : Form
             var options = new WriteOptions
             {
                 OutputDirectory = outputDirectory,
-                RecompressOodle = _settings.RecompressOodleOnSave,
-                OodlePath = _tools.Oodle,
             };
             var result = BankWriter.Write(_document, options);
             result.SaveAll();
@@ -1177,24 +1178,6 @@ public sealed class MainForm : Form
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         ImageIo.Save(image, dialog.FileName);
         SetStatus("Exported " + dialog.FileName);
-    }
-
-    private void ExportAllMips()
-    {
-        if (_texture is null) return;
-        using var dialog = new FolderBrowserDialog { Description = "Choose the output folder" };
-        if (dialog.ShowDialog(this) != DialogResult.OK) return;
-
-        int exported = 0;
-        for (int mip = 0; mip < _texture.Header.MipCount; mip++)
-        {
-            var image = DecodeSubresource(mip, 0, 0, out _);
-            if (image is null) continue;
-            var path = Path.Combine(dialog.SelectedPath, $"tex{_texture.Index}_mip{mip}.png");
-            ImageIo.Save(image, path);
-            exported++;
-        }
-        SetStatus($"Exported {exported} mip level(s).");
     }
 
     private void ExportDds()
@@ -1279,31 +1262,44 @@ public sealed class MainForm : Form
 
         try
         {
-            RgbaImage? image;
-            IReadOnlyList<RgbaImage>? cubeFaces = null;
+            // A DDS is already compressed: import it losslessly (surfaces copied, mips preserved)
+            // instead of decoding and re-encoding through the import dialog.
             if (dialog.FileName.EndsWith(".dds", StringComparison.OrdinalIgnoreCase))
             {
-                var dds = DdsIo.Read(File.ReadAllBytes(dialog.FileName));
-                var decoded = DecodeDds(dds, out var ddsError);
-                if (decoded.Count == 0)
+                DdsImage dds;
+                try
                 {
-                    SetStatus(ddsError ?? "Could not decode the DDS.");
+                    dds = DdsIo.Read(File.ReadAllBytes(dialog.FileName));
+                }
+                catch (Exception ex)
+                {
+                    SetStatus("Could not read the DDS: " + ex.Message);
                     return;
                 }
-                if (dds.IsCube && decoded.Count == 6) cubeFaces = decoded;
-                image = decoded[0];
-            }
-            else
-            {
-                image = ImageIo.Load(dialog.FileName);
+
+                var replaced = TextureOperations.ReplaceWithDds(_texture, dds, _settings.SyncFlagsFromFormat);
+                if (!replaced.Success)
+                {
+                    RefreshAll();
+                    SetStatus("Import failed: " + replaced.Error);
+                    return;
+                }
+
+                var ddsCommand = TextureOperations.TakePendingCommand();
+                if (ddsCommand is not null) _history.Push(ddsCommand);
+                RefreshAll();
+                SetStatus($"Imported {Path.GetFileName(dialog.FileName)} losslessly " +
+                          $"({dds.MipCount} mip(s), {dds.Format?.Name}).");
+                return;
             }
 
+            var image = ImageIo.Load(dialog.FileName);
             if (image is null) return;
 
             using var options = new TextureImportDialog(Path.GetFileName(dialog.FileName), image,
                 _texture.FormatInfo ?? FormatTable.Get(Xt1Format.Bc7Unorm)!, CurrentBackend,
                 EncodeQuality.Normal,
-                _settings.GenerateMips, canBeCube: true, defaultCube: cubeFaces is not null);
+                generateMips: true);
             if (options.ShowDialog(this) != DialogResult.OK) return;
 
             // Captured before the format is switched: the undo snapshot inside the operation must
@@ -1311,17 +1307,10 @@ public sealed class MainForm : Form
             // payload. The same snapshot restores the header if the encode fails.
             var originalHeader = _texture.Header.Raw.ToArray();
             _texture.Header.Format = options.SelectedFormat.Format;
-            var encoder = _batchConverter.Pick(options.Backend, options.SelectedFormat);
+            var encoder = _encoders.Pick(options.Backend, options.SelectedFormat);
 
-            OperationResult result;
-            if (options.IsCube && cubeFaces is not null)
-            {
-                result = TextureOperations.ReplaceCube(_texture, cubeFaces, encoder, options.GenerateMips, options.Quality, originalHeader);
-            }
-            else
-            {
-                result = TextureOperations.Replace2D(_texture, image, encoder, options.GenerateMips, options.Quality, originalHeader);
-            }
+            var result = TextureOperations.Replace2D(_texture, image, encoder, options.GenerateMips,
+                options.Quality, originalHeader, _settings.SyncFlagsFromFormat);
 
             if (!result.Success)
             {
@@ -1342,39 +1331,38 @@ public sealed class MainForm : Form
         }
     }
 
-    private static List<RgbaImage> DecodeDds(DdsImage dds, out string? error)
-    {
-        error = null;
-        var result = new List<RgbaImage>();
-        if (dds.Format is null)
-        {
-            error = "unsupported DDS format";
-            return result;
-        }
-
-        for (int face = 0; face < dds.Data.Length; face++)
-        {
-            var image = TextureCodec.DecodeLinear(dds.Data[face][0], dds.Width, dds.Height, dds.Format, out error);
-            if (image is null) return result;
-            result.Add(image);
-        }
-        return result;
-    }
-
     private void ReplaceRawPayload()
     {
         if (_texture is null) return;
-        using var dialog = new OpenFileDialog { Filter = "Raw payload (*.*)|*.*" };
+        using var dialog = new OpenFileDialog
+        {
+            Filter = "Raw XT1 (*.xt1)|*.xt1|Raw payload (*.*)|*.*",
+        };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
-        var payload = File.ReadAllBytes(dialog.FileName);
-        var result = TextureOperations.ReplaceRawPayload(_texture, payload, requireExactSize: true);
+        var bytes = File.ReadAllBytes(dialog.FileName);
+        if (RawXt1.HasMagic(bytes))
+        {
+            var replaced = TextureOperations.ReplaceWithXt1(_texture, bytes);
+            if (!replaced.Success)
+            {
+                SetStatus(replaced.Error ?? "Replace failed.");
+                return;
+            }
+            var xt1Command = TextureOperations.TakePendingCommand();
+            if (xt1Command is not null) _history.Push(xt1Command);
+            RefreshAll();
+            SetStatus("Replaced from " + Path.GetFileName(dialog.FileName));
+            return;
+        }
+
+        var result = TextureOperations.ReplaceRawPayload(_texture, bytes, requireExactSize: true);
         if (!result.Success)
         {
             var confirm = MessageBox.Show(this, result.Error + "\n\nApply anyway?", "Size mismatch",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
             if (confirm != DialogResult.Yes) return;
-            result = TextureOperations.ReplaceRawPayload(_texture, payload, requireExactSize: false);
+            result = TextureOperations.ReplaceRawPayload(_texture, bytes, requireExactSize: false);
         }
 
         if (!result.Success)
@@ -1397,30 +1385,52 @@ public sealed class MainForm : Form
             return;
         }
 
-        using var dialog = new OpenFileDialog { Filter = "Images (*.png;*.bmp;*.jpg;*.jpeg;*.tga)|*.png;*.bmp;*.jpg;*.jpeg;*.tga" };
+        using var dialog = new OpenFileDialog
+        {
+            Filter = "Images (*.png;*.bmp;*.jpg;*.jpeg;*.tga;*.dds)|*.png;*.bmp;*.jpg;*.jpeg;*.tga;*.dds|All files (*.*)|*.*",
+        };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
         try
         {
-            var image = ImageIo.Load(dialog.FileName);
             var name = Path.GetFileNameWithoutExtension(dialog.FileName);
-            using var options = new TextureImportDialog(Path.GetFileName(dialog.FileName), image,
-                FormatTable.Get(_settings.DefaultImportFormat) ?? FormatTable.Get(Xt1Format.Bc7Unorm)!,
-                CurrentBackend, EncodeQuality.Normal, _settings.GenerateMips, canBeCube: false);
-            if (options.ShowDialog(this) != DialogResult.OK) return;
+            EditableTexture? texture;
+            if (dialog.FileName.EndsWith(".dds", StringComparison.OrdinalIgnoreCase))
+            {
+                var dds = DdsIo.Read(File.ReadAllBytes(dialog.FileName));
+                texture = TextureOperations.BuildFromDds(dds, name, out var ddsError);
+                if (texture is null)
+                {
+                    SetStatus("Add failed: " + (ddsError ?? "could not import the DDS"));
+                    return;
+                }
+            }
+            else
+            {
+                var image = ImageIo.Load(dialog.FileName);
+                if (image is null) return;
+                using var options = new TextureImportDialog(Path.GetFileName(dialog.FileName), image,
+                    FormatTable.Get(_settings.DefaultImportFormat) ?? FormatTable.Get(Xt1Format.Bc7Unorm)!,
+                    CurrentBackend, EncodeQuality.Normal, generateMips: true);
+                if (options.ShowDialog(this) != DialogResult.OK) return;
 
-            var texture = EditableTexture.CreateNew(options.SelectedFormat.Format, (uint)image.Width, (uint)image.Height);
+                texture = EditableTexture.CreateNew(options.SelectedFormat.Format, (uint)image.Width, (uint)image.Height);
+                var encoder = _encoders.Pick(options.Backend, options.SelectedFormat);
+                var result = TextureOperations.Replace2D(texture, image, encoder, options.GenerateMips, options.Quality);
+                if (!result.Success)
+                {
+                    SetStatus("Add failed: " + result.Error);
+                    return;
+                }
+            }
+
+            // New textures default to the model/UI bank class and, per the flag-sync preference, get
+            // their sRGB/cubemap bits from the format they were encoded with.
             texture.Name = name;
             texture.HashMode = HashMode.AutoFromName;
             texture.Hash = Crc32NameHash.ComputeMasked(name);
-
-            var encoder = _batchConverter.Pick(options.Backend, options.SelectedFormat);
-            var result = TextureOperations.Replace2D(texture, image, encoder, options.GenerateMips, options.Quality);
-            if (!result.Success)
-            {
-                SetStatus("Add failed: " + result.Error);
-                return;
-            }
+            texture.SetModelBankClass(true);
+            if (_settings.SyncFlagsFromFormat) TextureOperations.SyncFlagsFromFormat(texture);
 
             _history.Execute(TextureOperations.CreateAddTextureCommand(_section, texture));
             RebuildTree();
@@ -1679,36 +1689,46 @@ public sealed class MainForm : Form
         _nvttNative = null;
         _nvttEncoder = null;
         _cliEncoder = null;
-        _oodle?.Dispose();
-        _oodle = null;
 
         InitializeNativeTools();
         UpdatePreview();
         SetStatus("Settings saved.");
     }
 
-    private void ShowBatchBuild()
+    private void ShowBatchRecompress()
     {
-        using var dialog = new BatchBuildDialog(RunBatchAsync, CurrentBackend, EncodeQuality.Normal,
-            _settings.GenerateMips, FormatTable.Get(_settings.DefaultImportFormat) ?? FormatTable.Get(Xt1Format.Bc7Unorm)!);
+        using var dialog = new BatchRecompressDialog(RunBatchRecompressAsync, CurrentBackend,
+            _document is not null);
         dialog.ShowDialog(this);
-        if (_document?.FilePath is { } path && File.Exists(path)) LoadFile(path);
+        if (_document is not null)
+        {
+            // Rebind from scratch: a recompress replaced payloads (and possibly a raw .xt1's), so the
+            // preview wrappers and tree labels have to be rebuilt rather than refreshed in place.
+            AdoptDocument(_document);
+        }
+        else
+        {
+            RefreshAll();
+        }
     }
 
-    private Task RunBatchAsync(IReadOnlyList<string> files, BatchRequest request,
-        IProgress<string> progress, CancellationToken token)
+    private Task RunBatchRecompressAsync(RecompressRequest request, IProgress<string> progress,
+        CancellationToken token)
     {
         return Task.Run(() =>
         {
-            var options = new BatchOptions(request.TargetFormat, request.Backend, request.Quality,
-                request.GenerateMips, request.OverwriteInPlace, request.OutputDirectory,
-                request.InputRootDirectory);
-            _batchConverter.Run(files, options, progress, token);
+            if (request.CurrentDocument)
+            {
+                if (_document is not null)
+                    _recompressor.RunOnDocument(_document, request.Options, progress, token);
+                return;
+            }
+            _recompressor.RunOnFiles(request.Files, request.Options, progress, token);
         }, token);
     }
 
     private EncoderBackend CurrentBackend =>
-        (EncoderBackend)(_backendCombo.SelectedItem ?? EncoderBackend.Managed);
+        (EncoderBackend)(_backendCombo.SelectedItem ?? EncoderBackend.Nvtt);
 
     private void OnBackendChanged()
     {
