@@ -9,7 +9,7 @@ namespace Xt1.Core.Codecs;
 /// from this so a new format cannot be added to one path and forgotten in the other.
 ///
 /// Formats the managed path cannot handle correctly are reported as unsupported so they route to
-/// NVTT instead: signed BC4/BC5 (BCnEncoder has no signed variants) and BC6H encoding.
+/// NVTT instead: BC6H encoding (BCnEncoder has no BC6H encoder).
 /// </summary>
 public static class ManagedFormatMap
 {
@@ -38,7 +38,8 @@ public static class ManagedFormatMap
 
     private static bool TryGetBcFormat(Xt1Format format, bool forEncoding, out CompressionFormat compression)
     {
-        switch (format)
+        // Aliases resolve to their canonical format, so they need no cases of their own here.
+        switch (FormatTable.Canonical(format))
         {
             case Xt1Format.Bc1Unorm:
             case Xt1Format.Bc1Srgb:
@@ -63,10 +64,6 @@ public static class ManagedFormatMap
             case Xt1Format.Bc5Unorm:
                 compression = CompressionFormat.Bc5;
                 return true;
-            // Bc4Snorm/Bc5Snorm are deliberately absent. BCnEncoder's Bc4/Bc5 are unsigned, so using
-            // them would decode signed data as unsigned and re-encode it as unsigned under a SNORM
-            // header. Routing them to NVTT (which has BC4_SIGNED/BC5_SIGNED) is correct; with no NVTT
-            // available the operation is refused rather than silently writing the wrong blocks.
             case Xt1Format.Bc7Unorm:
             case Xt1Format.Bc7Srgb:
                 compression = CompressionFormat.Bc7;

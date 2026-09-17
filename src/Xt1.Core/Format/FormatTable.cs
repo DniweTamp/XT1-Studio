@@ -42,12 +42,31 @@ public static class FormatTable
             new(Xt1Format.Bc1Srgb, "BC1_SRGB", 4, 4, 8, CodecKind.Bc, true, true),
             new(Xt1Format.Bc2Srgb, "BC2_SRGB", 4, 4, 16, CodecKind.Bc, true, true),
             new(Xt1Format.Bc3Srgb, "BC3_SRGB", 4, 4, 16, CodecKind.Bc, true, true),
-            new(Xt1Format.Bc4Snorm, "BC4_SNORM", 4, 4, 8, CodecKind.Bc, false, true),
+            // 0x49 is BC4_UNORM in practice (community tools label it SNORM, but the payload tests
+            // unsigned). Alias so the id round-trips; decoded and encoded like 0x45.
+            new(Xt1Format.Bc4UnormAlt, "BC4_UNORM", 4, 4, 8, CodecKind.Bc, false, true)
+            {
+                AliasOf = Xt1Format.Bc4Unorm,
+            },
             new(Xt1Format.Bc5Unorm, "BC5_UNORM", 4, 4, 16, CodecKind.Bc, false, false),
-            new(Xt1Format.Bc5Snorm, "BC5_SNORM", 4, 4, 16, CodecKind.Bc, false, false),
+            // 0x4B is BC5_UNORM in practice (labelled SNORM by other tools); alias of 0x4A.
+            new(Xt1Format.Bc5UnormAlt, "BC5_UNORM", 4, 4, 16, CodecKind.Bc, false, true)
+            {
+                AliasOf = Xt1Format.Bc5Unorm,
+            },
             new(Xt1Format.Bc6hUf16, "BC6H_UF16", 4, 4, 16, CodecKind.Bc, false, true),
             new(Xt1Format.Bc7Unorm, "BC7_UNORM", 4, 4, 16, CodecKind.Bc, false, false),
             new(Xt1Format.Bc7Srgb, "BC7_SRGB", 4, 4, 16, CodecKind.Bc, true, false),
+            // Community/legacy ids for the same BC7 payloads. Verified because the blocks are the
+            // canonical BC7 blocks, not a distinct format the tool has never round-tripped.
+            new(Xt1Format.Bc7UnormAlt, "BC7_UNORM", 4, 4, 16, CodecKind.Bc, false, true)
+            {
+                AliasOf = Xt1Format.Bc7Unorm,
+            },
+            new(Xt1Format.Bc7SrgbAlt, "BC7_SRGB", 4, 4, 16, CodecKind.Bc, true, true)
+            {
+                AliasOf = Xt1Format.Bc7Srgb,
+            },
             new(Xt1Format.Unknown6d, "UNKNOWN_0x6D (32bpp)", 1, 1, 4, CodecKind.Raw, false, false),
         };
 
@@ -71,4 +90,14 @@ public static class FormatTable
         var parts = name.Split('x');
         return (int.Parse(parts[0]), int.Parse(parts[1]));
     }
+
+    /// <summary>
+    /// Resolve an alias id to the canonical format it stands in for; returns the input unchanged for
+    /// a canonical (or unknown) format. The codec/NVTT/DXGI tables all key off this so an alias is
+    /// declared once, in the format table.
+    /// </summary>
+    public static Xt1Format Canonical(Xt1Format format) => Get(format)?.AliasOf ?? format;
+
+    /// <summary>Every alias entry (an id whose <see cref="FormatInfo.AliasOf"/> points elsewhere).</summary>
+    public static IEnumerable<FormatInfo> Aliases => All.Where(f => f.IsAlias);
 }

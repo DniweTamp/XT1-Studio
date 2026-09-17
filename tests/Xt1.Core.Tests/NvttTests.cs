@@ -28,8 +28,9 @@ public class NvttTests
         Assert.Equal(NvttFormat.Bc2, NvttFormatMap.ToNvtt(Xt1Format.Bc2Unorm));
         Assert.Equal(NvttFormat.Bc3, NvttFormatMap.ToNvtt(Xt1Format.Bc3Unorm));
         Assert.Equal(NvttFormat.Bc4, NvttFormatMap.ToNvtt(Xt1Format.Bc4Unorm));
-        Assert.Equal(NvttFormat.Bc4S, NvttFormatMap.ToNvtt(Xt1Format.Bc4Snorm));
+        Assert.Equal(NvttFormat.Bc4, NvttFormatMap.ToNvtt(Xt1Format.Bc4UnormAlt));
         Assert.Equal(NvttFormat.Bc5, NvttFormatMap.ToNvtt(Xt1Format.Bc5Unorm));
+        Assert.Equal(NvttFormat.Bc5, NvttFormatMap.ToNvtt(Xt1Format.Bc5UnormAlt));
         Assert.Equal(NvttFormat.Bc6U, NvttFormatMap.ToNvtt(Xt1Format.Bc6hUf16));
         Assert.Equal(NvttFormat.Bc7, NvttFormatMap.ToNvtt(Xt1Format.Bc7Unorm));
         Assert.Null(NvttFormatMap.ToNvtt(Xt1Format.Rgba8Unorm));

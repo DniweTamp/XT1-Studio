@@ -280,7 +280,8 @@ public sealed class MainForm : Form
         var info = selected?.FormatInfo;
         bool canDecode = TextureCodec.CanDecode(info);
         bool canExportDds = info is not null && DdsIo.CanExport(info);
-        bool inBank = _section is not null && _section.Bank.Textures.Count > 0;
+        bool inBank = _section is not null;
+        bool bankHasTextures = inBank && _section!.Bank.Textures.Count > 0;
 
         _menuReplace.Enabled = hasTexture;
         _menuReplaceXt1.Enabled = hasTexture;
@@ -288,10 +289,12 @@ public sealed class MainForm : Form
         _menuExportPng.Enabled = hasTexture && canDecode;
         _menuExportDds.Enabled = hasTexture && canExportDds;
         _menuExportXt1.Enabled = hasTexture;
+        // Adding only needs a bank, not an existing texture, so an empty bank can be filled.
         _menuAddTexture.Enabled = inBank;
+        // Deleting removes the selected texture from its bank, so it needs both.
         _menuDeleteTexture.Enabled = hasTexture && inBank;
         _menuCopyHash.Enabled = hasTexture;
-        _menuExportBank.Enabled = inBank;
+        _menuExportBank.Enabled = bankHasTextures;
     }
 
     private void BuildToolbar()
@@ -545,7 +548,7 @@ public sealed class MainForm : Form
             Title = "Choose the new bank file",
             Filter = dialog.Standalone
                 ? "Standalone WTB (*.wtb)|*.wtb"
-                : "Effect bank (*.wta)|*.wta",
+                : "Split bank (*.wta)|*.wta",
             FileName = dialog.Standalone ? "new.wtb" : "new.wta",
             InitialDirectory = _settings.LastDirectory ?? Environment.CurrentDirectory,
         };
@@ -557,7 +560,8 @@ public sealed class MainForm : Form
             AdoptDocument(BankDocument.CreateEmpty(kind, save.FileName));
             _settings.LastDirectory = Path.GetDirectoryName(save.FileName);
             _settings.Save();
-            SetStatus($"New empty {(dialog.Standalone ? "WTB" : "WTA")} bank - add textures from the tree menu, then Save.");
+            SetStatus($"New empty {(dialog.Standalone ? "standalone WTB" : "split WTA")} bank - right-click the " +
+                      "bank in the tree and choose \"Add texture from image...\", then Save.");
         }
         catch (Exception ex)
         {
@@ -1180,11 +1184,18 @@ public sealed class MainForm : Form
         SetStatus("Exported " + dialog.FileName);
     }
 
+    /// <summary>
+    /// Apply the import dialog's optional passes to a freshly decoded image: alpha bleeding first
+    /// (so the colour fill still sees the cutout), then the opaque conversion.
+    /// </summary>
+    private static RgbaImage PreprocessImport(RgbaImage image, TextureImportDialog options) =>
+        Solidify.Process(image, options.Solidify, options.MakeOpaque);
+
     private void ExportDds()
     {
         if (_texture is null) return;
         var info = _texture.FormatInfo;
-        if (info is null || !DdsIo.CanExport(info))
+        if (info is null || !DdsExport.CanExport(_texture))
         {
             SetStatus($"DDS export is not supported for {info?.Name ?? "this format"} (use raw XT1 or PNG).");
             return;
@@ -1199,28 +1210,7 @@ public sealed class MainForm : Form
 
         try
         {
-            var layout = _texture.Layout;
-            int faceCount = layout.FaceCount;
-            var data = new byte[faceCount][][];
-            for (int face = 0; face < faceCount; face++)
-            {
-                data[face] = new byte[_texture.Header.MipCount][];
-                for (int mip = 0; mip < _texture.Header.MipCount; mip++)
-                {
-                    int wb = layout.Mips[mip].WidthBlocks;
-                    int hb = layout.Mips[mip].HeightBlocks;
-                    int bpb = info.BytesPerBlock;
-                    var linear = TextureCodec.ExtractLinearBlocks(_texture, mip, face, 0, out _, out _);
-                    data[face][mip] = linear.Length == wb * hb * bpb
-                        ? linear
-                        : linear.AsSpan(0, wb * hb * bpb).ToArray();
-                }
-            }
-
-            var bytes = DdsIo.Write(info, (int)_texture.Header.Width, (int)_texture.Header.Height,
-                (int)_texture.Header.Depth, _texture.Header.MipCount, faceCount,
-                _texture.Header.Type.IsCube(), data);
-            File.WriteAllBytes(dialog.FileName, bytes);
+            File.WriteAllBytes(dialog.FileName, DdsExport.Build(_texture));
             SetStatus("Exported " + dialog.FileName);
         }
         catch (Exception ex)
@@ -1301,6 +1291,8 @@ public sealed class MainForm : Form
                 EncodeQuality.Normal,
                 generateMips: true);
             if (options.ShowDialog(this) != DialogResult.OK) return;
+
+            image = PreprocessImport(image, options);
 
             // Captured before the format is switched: the undo snapshot inside the operation must
             // record the header as it was, otherwise undoing leaves the new format over the old
@@ -1414,6 +1406,7 @@ public sealed class MainForm : Form
                     CurrentBackend, EncodeQuality.Normal, generateMips: true);
                 if (options.ShowDialog(this) != DialogResult.OK) return;
 
+                image = PreprocessImport(image, options);
                 texture = EditableTexture.CreateNew(options.SelectedFormat.Format, (uint)image.Width, (uint)image.Height);
                 var encoder = _encoders.Pick(options.Backend, options.SelectedFormat);
                 var result = TextureOperations.Replace2D(texture, image, encoder, options.GenerateMips, options.Quality);
@@ -1838,6 +1831,20 @@ public sealed class MainForm : Form
         $"sliceZ={_glPreview.SliceZ:F2} distance={_glPreview.Camera.Distance:F2} tab={_viewTabs.SelectedIndex}";
 
     /// <summary>Test hook used by <c>--uitest</c>: the right-click menu entries for the current selection.</summary>
+    /// <summary>Test hook: adopt a new empty bank without going through the dialogs.</summary>
+    internal Xt1.Core.Containers.BankDocument UiTestCreateEmptyBank(bool standalone)
+    {
+        var kind = standalone
+            ? Xt1.Core.Containers.BankKind.StandaloneWtb
+            : Xt1.Core.Containers.BankKind.EffectWta;
+        var directory = Path.Combine(Path.GetTempPath(), "Xt1Studio", "uitest");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, standalone ? "empty.wtb" : "empty.wta");
+        var document = Xt1.Core.Containers.BankDocument.CreateEmpty(kind, path);
+        AdoptDocument(document);
+        return document;
+    }
+
     internal IReadOnlyList<string> UiTestTreeMenuItems()
     {
         UpdateTreeMenuState();

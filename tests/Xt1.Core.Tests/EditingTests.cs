@@ -242,6 +242,122 @@ public class EditingTests
             Assert.Equal(data[0][m], read.Data[0][m]);
     }
 
+    /// <summary>
+    /// ASTC DDS must use NVIDIA's DXGI numbering (four slots per footprint, id = 134 + 4i for UNORM
+    /// and 135 + 4i for sRGB). A stride-3 table maps a footprint onto a neighbouring one, which is
+    /// why an 8x6 import used to show up as 10x5.
+    /// </summary>
+    [Theory]
+    [InlineData(Xt1Format.Astc4x4Unorm, 134u)]
+    [InlineData(Xt1Format.Astc5x4Unorm, 138u)]
+    [InlineData(Xt1Format.Astc6x6Unorm, 150u)]
+    [InlineData(Xt1Format.Astc8x6Unorm, 158u)]
+    [InlineData(Xt1Format.Astc8x8Unorm, 162u)]
+    [InlineData(Xt1Format.Astc10x5Unorm, 166u)]
+    [InlineData(Xt1Format.Astc8x8Srgb, 163u)]
+    public void Dds_AstcUsesNvttDxgiIds(Xt1Format formatValue, uint expectedDxgi)
+    {
+        var format = FormatTable.Get(formatValue)!;
+        var surface = new byte[format.BytesPerBlock];
+        var bytes = DdsIo.Write(format, format.BlockWidth, format.BlockHeight, 1, 1, 1, false,
+            new byte[1][][] { new[] { surface } });
+
+        Assert.Equal(expectedDxgi, Mem.ReadU32LE(bytes, 0x80));
+        var read = DdsIo.Read(bytes);
+        Assert.Equal(formatValue, read.Format!.Format);
+    }
+
+    /// <summary>
+    /// The alternate 0x49/0x4B ids are unsigned BC4/BC5, so they decode and export DDS as the UNORM
+    /// DXGI ids (80/83) with full surfaces. They previously were treated as SNORM, which left them
+    /// without a decoder and made DDS export write a header-only file.
+    /// </summary>
+    [Theory]
+    [InlineData(Xt1Format.Bc4UnormAlt, 80u, Xt1Format.Bc4Unorm)]
+    [InlineData(Xt1Format.Bc5UnormAlt, 83u, Xt1Format.Bc5Unorm)]
+    public void Dds_ExportsUnsignedBc4Bc5Alternates(Xt1Format formatValue, uint expectedDxgi,
+        Xt1Format readBack)
+    {
+        var info = FormatTable.Get(formatValue)!;
+        Assert.True(TextureCodec.CanDecode(info));
+        Assert.True(TextureCodec.CanEncode(info));
+
+        var texture = EditableTexture.CreateNew(formatValue, 64, 64);
+        Assert.True(DdsExport.CanExport(texture));
+
+        var bytes = DdsExport.Build(texture);
+        Assert.Equal(expectedDxgi, Mem.ReadU32LE(bytes, 0x80));
+
+        var read = DdsIo.Read(bytes);
+        Assert.Equal(readBack, read.Format!.Format);
+        int expected = (64 / info.BlockWidth) * (64 / info.BlockHeight) * info.BytesPerBlock;
+        Assert.Equal(expected, read.Data[0][0].Length);
+        Assert.True(bytes.Length > 0x94, "the export must contain the surface, not just the header");
+    }
+
+    /// <summary>The DDS header uses the flags NVTT's reader expects (LINEARSIZE, MIPMAP, caps2).</summary>
+    [Fact]
+    public void Dds_HeaderMatchesNvttConvention()
+    {
+        var format = FormatTable.Get(Xt1Format.Astc8x6Unorm)!;
+        int surfaceSize = format.WidthBlocks(64) * format.HeightBlocks(64) * format.BytesPerBlock;
+        var mips = new[] { new byte[surfaceSize], new byte[surfaceSize], new byte[surfaceSize] };
+
+        var twoD = DdsIo.Write(format, 64, 64, 1, 3, 1, false, new byte[1][][] { mips });
+        Assert.Equal(0x000A1007u, Mem.ReadU32LE(twoD, 0x08)); // CAPS|HEIGHT|WIDTH|PIXELFORMAT|MIPMAPCOUNT|LINEARSIZE
+        Assert.Equal((uint)surfaceSize, Mem.ReadU32LE(twoD, 0x14)); // dwPitchOrLinearSize
+        Assert.Equal(0x00401008u, Mem.ReadU32LE(twoD, 0x6C)); // TEXTURE|COMPLEX|MIPMAP
+        Assert.Equal(0u, Mem.ReadU32LE(twoD, 0x70)); // caps2 empty for a 2D texture
+
+        var cubeFaces = new byte[6][][];
+        for (int i = 0; i < 6; i++) cubeFaces[i] = new[] { new byte[surfaceSize] };
+        var cube = DdsIo.Write(format, 64, 64, 1, 1, 6, true, cubeFaces);
+        Assert.Equal(0x200u | 0xFC00u, Mem.ReadU32LE(cube, 0x70)); // CUBEMAP | ALLFACES
+        Assert.Equal(4u, Mem.ReadU32LE(cube, 0x88)); // miscFlag cube
+    }
+
+    /// <summary>
+    /// A 3D volume exports every depth slice of each level, not just the first slice; a short level
+    /// is what made readers reject the file.
+    /// </summary>
+    [Fact]
+    public void DdsExport_VolumesKeepAllSlices()
+    {
+        if (!TestPaths.Exists(TestPaths.CoreDat)) return;
+        var document = BankDocument.Load(TestPaths.CoreDat);
+        // Decode-only formats (the 0x6D volumes) have no DDS equivalent and are not offered.
+        var volumes = document.AllTextures
+            .Where(t => t.Header.Type.Is3D() && t.Header.Depth > 1 && DdsExport.CanExport(t))
+            .ToList();
+        Assert.NotEmpty(volumes);
+
+        // The reported case, and every other 3D texture in the bank (including multi-mip ones).
+        Assert.Contains(volumes, t => t.EffectiveHash() == 0x24AD32DDu);
+
+        foreach (var volume in volumes)
+        {
+            var bytes = DdsExport.Build(volume);
+            var read = DdsIo.Read(bytes);
+
+            Assert.Equal(volume.Header.Format, read.Format!.Format);
+            Assert.Equal((int)volume.Header.Width, read.Width);
+            Assert.Equal((int)volume.Header.Height, read.Height);
+            Assert.Equal((int)volume.Header.Depth, read.Depth);
+            Assert.False(read.IsCube);
+
+            var info = read.Format!;
+            for (int mip = 0; mip < read.MipCount; mip++)
+            {
+                int w = Math.Max(1, read.Width >> mip);
+                int h = Math.Max(1, read.Height >> mip);
+                int d = Math.Max(1, read.Depth >> mip);
+                int expected = Mem.DivUp(w, info.BlockWidth) * Mem.DivUp(h, info.BlockHeight)
+                               * info.BytesPerBlock * d;
+                Assert.Equal(expected, read.Data[0][mip].Length);
+            }
+        }
+    }
+
     /// <summary>ASTC can be written to (and read back from) a DX10 DDS like any BC format.</summary>
     [Theory]
     [InlineData(Xt1Format.Astc4x4Unorm)]

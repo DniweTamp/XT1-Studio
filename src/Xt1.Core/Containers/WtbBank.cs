@@ -39,7 +39,7 @@ public sealed class WtbBank
     public uint Table3Offset { get; set; }
     public uint Xt1Offset { get; set; }
 
-    /// <summary>When false the table3 array is omitted entirely (effect banks).</summary>
+    /// <summary>When false the table3 array is omitted entirely (split `.wta`+`.wtp` banks).</summary>
     public bool IncludeTable3 { get; set; }
 
     /// <summary>Base subtracted from <c>table0</c> to obtain a stream-relative offset (0 split, 0x1000 standalone).</summary>

@@ -146,7 +146,7 @@ public sealed class EditableTexture
 
     // --- table2 decoded bits (XT1_FORMAT.md section 4) ---
 
-    /// <summary>First table2 byte: 0x20 for model/UI banks, 0x00 for effect banks.</summary>
+    /// <summary>First table2 byte: 0x20 for model/UI bank entries, 0x00 otherwise.</summary>
     public byte Table2B0
     {
         get => Table2Bytes[0];

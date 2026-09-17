@@ -109,7 +109,7 @@ public sealed class BankDocument
             document.HeaderSidePath = path;
 
             // A raw WTB file is either a standalone `.wtb` (payload inline) or the `.wta` half of
-            // an effect bank whose payload lives in the sibling `.wtp`. The extension decides which:
+            // a split bank whose payload lives in the sibling `.wtp`. The extension decides which:
             // an empty standalone bank has no table0 offset to infer it from.
             bool standaloneByExtension = path.EndsWith(".wtb", StringComparison.OrdinalIgnoreCase);
             var wtpPath = Path.ChangeExtension(path, ".wtp");
@@ -160,9 +160,10 @@ public sealed class BankDocument
     }
 
     /// <summary>
-    /// Author a brand-new empty bank. Effect banks are a `.wta` header with a matching `.wtp`
-    /// payload stream; a standalone is a single `.wtb` with its payload inline. DAT containers are
-    /// not authored here (the user can still open and edit existing ones).
+    /// Author a brand-new empty bank. A split bank is a `.wta` header with a matching `.wtp` payload
+    /// stream (the layout used by most banks in the game, not just effects); a standalone is a single
+    /// `.wtb` with its payload inline. DAT containers are not authored here (the user can still open
+    /// and edit existing ones).
     /// </summary>
     public static BankDocument CreateEmpty(BankKind kind, string headerPath)
     {

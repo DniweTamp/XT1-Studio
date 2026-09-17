@@ -136,7 +136,7 @@ public sealed class TextureInspectorPanel : UserControl
         AddToStack(stack, hashCard);
 
         // --- Flags -----------------------------------------------------------------------
-        _modelBox = NewFlag("Model / UI bank entry", "table2 byte 0, bit 0x20 - set for model and UI banks, clear for effect banks");
+        _modelBox = NewFlag("Model / UI bank entry", "table2 byte 0, bit 0x20 - set for model and UI bank entries, clear otherwise");
         _srgbBox = NewFlag("sRGB color space", "table2 byte 3, bit 0x04");
         _cubeBox = NewFlag("Cube map usage", "table2 byte 3, bit 0x80");
         _table2Note = new Label { AutoSize = true, ForeColor = MutedColor, Font = MonoFont, Margin = new Padding(0, 6, 0, 0) };
@@ -472,7 +472,7 @@ public sealed class TextureInspectorPanel : UserControl
         {
             info is null
                 ? $"unknown format (0x{header.FormatValue:X2})"
-                : $"{info.Name} (0x{header.FormatValue:X2})",
+                : info.DisplayName,
             $"{(ulong)header.Width} x {(ulong)header.Height} x {header.Depth}",
             header.Type.Describe(),
             header.MipCount == 1 ? "1 mip level" : $"{header.MipCount} mip levels",

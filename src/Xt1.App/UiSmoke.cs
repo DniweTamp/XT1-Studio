@@ -156,6 +156,16 @@ internal static class UiSmoke
             Expect(log, bankMenu.Contains("Export every texture in this bank (PNG folder)...|enabled"),
                 "the bank menu offers the bank export", "Export every texture in this bank (PNG folder)...");
 
+            // A brand-new empty bank must still offer "Add texture" (it has no texture to select,
+            // which used to leave the whole menu greyed out).
+            Step("--- empty bank ---");
+            inspectorForm.UiTestCreateEmptyBank(standalone: false);
+            Pump(log, ref watch, "created an empty split bank", 30);
+            var emptyMenu = inspectorForm.UiTestTreeMenuItems();
+            log($"       menu: {string.Join(", ", emptyMenu)}");
+            Expect(log, emptyMenu.Contains("Add texture from image...|enabled"),
+                "an empty bank can still be filled", string.Join(", ", emptyMenu));
+
             inspectorForm.Close();
             Step("inspector MainForm closed");
 
@@ -186,8 +196,26 @@ internal static class UiSmoke
                 Pump(log, ref watch, "batch-recompress dialog shown", 40);
                 recompress.Close();
             }
+            using (var import = new Forms.TextureImportDialog("test.png",
+                       new Xt1.Core.Imaging.RgbaImage(4, 4),
+                       Xt1.Core.Format.FormatTable.Get(Xt1.Core.Format.Xt1Format.Bc7Unorm)!,
+                       Xt1.Core.Encoding.EncoderBackend.Nvtt, Xt1.Core.Encoding.EncodeQuality.Normal,
+                       generateMips: true))
+            {
+                import.Show();
+                Pump(log, ref watch, "import dialog shown", 30);
+                var targets = import.UiTestFormatItems();
+                Expect(log, targets.Contains("BC7_UNORM (0x4D, community)"),
+                    "the import dialog offers the community BC7 id as a target", string.Join(", ", targets.Where(t => t.StartsWith("BC7"))));
+                var optionLabels = import.UiTestOptionLabels();
+                Expect(log, optionLabels.Any(o => o.StartsWith("Solidify")), "the import dialog offers solidify",
+                    string.Join(" | ", optionLabels));
+                Expect(log, optionLabels.Any(o => o.StartsWith("Force opaque")), "the import dialog offers force-opaque",
+                    string.Join(" | ", optionLabels));
+                import.Close();
+            }
 
-            // Phase 3: a 3D texture, to exercise the volume view wiring the way clicks would:
+            // Phase 4: a 3D texture, to exercise the volume view wiring the way clicks would:
             // the assembled render, per-channel isolation, the opaque switch and the slice planes.
             var volumeTarget = new[]
             {

@@ -1,5 +1,9 @@
+using Xt1.Core.Codecs;
 using Xt1.Core.Containers;
+using Xt1.Core.Encoding;
 using Xt1.Core.Format;
+using Xt1.Core.Imaging;
+using Xt1.Core.Nvtt;
 using Xt1.Core.Xt1;
 using Xunit;
 
@@ -66,6 +70,110 @@ public class FormatTests
         Assert.Equal(4, FormatTable.Get(0x6d)!.BytesPerBlock);
         Assert.True(Core.Codecs.TextureCodec.CanDecode(FormatTable.Get(0x6d)));
         Assert.False(Core.Codecs.TextureCodec.CanEncode(FormatTable.Get(0x6d)));
+    }
+
+    /// <summary>
+    /// Community mods use 0x4D/0x4E for BC7. They must decode (and re-encode) exactly like the
+    /// canonical 0x51/0x52, and must not clutter the format pickers.
+    /// </summary>
+    [Theory]
+    [InlineData(0x4Du, false)]
+    [InlineData(0x4Eu, true)]
+    public void Bc7AliasIds_DecodeAsBc7(uint value, bool srgb)
+    {
+        Assert.True(FormatTable.TryGet(value, out var info));
+        Assert.True(info.IsAlias);
+        Assert.Equal(CodecKind.Bc, info.Codec);
+        Assert.Equal(srgb, info.IsSrgb);
+        Assert.Equal(16, info.BytesPerBlock);
+        Assert.Equal(4, info.BlockWidth);
+        Assert.True(TextureCodec.CanDecode(info));
+        Assert.True(TextureCodec.CanEncode(info));
+        Assert.True(ManagedFormatMap.TryGetDecodeFormat(info, out var compression));
+        Assert.Equal("Bc7", compression.ToString());
+        Assert.True(ManagedFormatMap.TryGetEncodeFormat(info, out var encodeCompression));
+        Assert.Equal("Bc7", encodeCompression.ToString());
+    }
+
+    /// <summary>
+    /// Aliases are declared once (FormatTable.AliasOf) and every capability/DXGI table follows the
+    /// canonical entry. This guards the drift the tables used to allow when each listed aliases
+    /// itself.
+    /// </summary>
+    [Fact]
+    public void Aliases_ResolveToCanonicalAndStayConsistent()
+    {
+        var aliases = FormatTable.Aliases.ToList();
+        Assert.NotEmpty(aliases);
+
+        foreach (var alias in aliases)
+        {
+            var canonical = FormatTable.Get(alias.AliasOf!.Value);
+            Assert.NotNull(canonical);
+            Assert.False(canonical!.IsAlias, "aliases must point at a canonical entry, not another alias");
+            Assert.Equal(canonical.Codec, alias.Codec);
+            Assert.Equal(canonical.BytesPerBlock, alias.BytesPerBlock);
+            Assert.Equal(canonical.BlockWidth, alias.BlockWidth);
+            Assert.Equal(canonical.BlockHeight, alias.BlockHeight);
+            Assert.Equal(canonical.IsSrgb, alias.IsSrgb);
+            Assert.Equal(canonical.Name, alias.Name);
+
+            Assert.Equal(ManagedFormatMap.SupportsDecode(canonical), ManagedFormatMap.SupportsDecode(alias));
+            Assert.Equal(ManagedFormatMap.SupportsEncode(canonical), ManagedFormatMap.SupportsEncode(alias));
+            Assert.Equal(NvttFormatMap.ToNvtt(canonical.Format), NvttFormatMap.ToNvtt(alias.Format));
+            Assert.Equal(NvttFormatMap.ToCliFormatName(canonical.Format),
+                NvttFormatMap.ToCliFormatName(alias.Format));
+
+            Assert.True(DdsIo.TryGetDxgi(canonical, out uint canonicalDxgi));
+            Assert.True(DdsIo.TryGetDxgi(alias, out uint aliasDxgi));
+            Assert.Equal(canonicalDxgi, aliasDxgi);
+        }
+    }
+
+    [Fact]
+    public void Bc7Aliases_AreSelectableTargetFormats()
+    {
+        var all = FormatTable.All.ToList();
+        Assert.Contains(all, f => f.Format == Xt1Format.Bc7UnormAlt);
+        Assert.Contains(all, f => f.Format == Xt1Format.Bc7SrgbAlt);
+
+        // Names match the canonical entries; the id in DisplayName is what tells them apart.
+        var unorm = FormatTable.Get(Xt1Format.Bc7UnormAlt)!;
+        var srgb = FormatTable.Get(Xt1Format.Bc7SrgbAlt)!;
+        Assert.Equal("BC7_UNORM", unorm.Name);
+        Assert.Equal("BC7_SRGB", srgb.Name);
+        Assert.Equal("BC7_UNORM (0x4D, community)", unorm.DisplayName);
+        Assert.Equal("BC7_SRGB (0x4E, community)", srgb.DisplayName);
+        Assert.Equal("BC7_UNORM (0x51)", FormatTable.Get(Xt1Format.Bc7Unorm)!.DisplayName);
+        Assert.Equal("BC7_SRGB (0x52)", FormatTable.Get(Xt1Format.Bc7Srgb)!.DisplayName);
+    }
+
+    [Fact]
+    public void Bc7Alias_DecodesTheSameBlocksAsTheCanonicalId()
+    {
+        var canonical = FormatTable.Get(Xt1Format.Bc7Unorm)!;
+        var alias = FormatTable.Get(Xt1Format.Bc7UnormAlt)!;
+
+        var image = new RgbaImage(32, 32);
+        for (int y = 0; y < 32; y++)
+            for (int x = 0; x < 32; x++)
+                image.SetPixel(x, y, (byte)(x * 8), (byte)(y * 8), (byte)((x + y) * 4), 255);
+
+        var encoded = new ManagedEncoder().Encode(image, canonical, srgb: false, EncodeQuality.Normal);
+        Assert.True(encoded.Success, encoded.Error);
+
+        var fromCanonical = TextureCodec.DecodeLinear(encoded.Data, 32, 32, canonical, out _);
+        var fromAlias = TextureCodec.DecodeLinear(encoded.Data, 32, 32, alias, out _);
+        Assert.NotNull(fromCanonical);
+        Assert.NotNull(fromAlias);
+        Assert.Equal(fromCanonical!.Pixels, fromAlias!.Pixels);
+    }
+
+    [Fact]
+    public void Bc7Aliases_ExportToDds()
+    {
+        Assert.True(DdsIo.CanExport(FormatTable.Get(Xt1Format.Bc7UnormAlt)!));
+        Assert.True(DdsIo.CanExport(FormatTable.Get(Xt1Format.Bc7SrgbAlt)!));
     }
 
     [Theory]

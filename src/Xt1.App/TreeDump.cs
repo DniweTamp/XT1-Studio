@@ -96,7 +96,7 @@ internal static class TreeDump
                     unsupportedFormats.Add(
                         texture.FormatInfo is null
                             ? $"unknown 0x{texture.Header.FormatValue:X2}"
-                            : $"{texture.FormatInfo.Name} (0x{texture.Header.FormatValue:X2})");
+                            : texture.FormatInfo.DisplayName);
                     continue;
                 }
                 supported++;

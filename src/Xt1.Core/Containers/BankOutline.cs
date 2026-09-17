@@ -64,7 +64,7 @@ public static class BankOutline
     /// <summary>
     /// The label for a texture leaf: <c>#0  0x421E5ED4  BC1_UNORM  512x512  m10</c>. The table3
     /// hash is shown after the index when the bank carries a hash table (materials bind textures
-    /// by it); effect banks omit table3 entirely, so the segment is dropped there.
+    /// by it); split `.wta`+`.wtp` banks omit table3 entirely, so the segment is dropped there.
     /// </summary>
     public static string TextureLabel(EditableTexture texture, bool includeHash = false)
     {

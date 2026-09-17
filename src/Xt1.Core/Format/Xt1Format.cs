@@ -36,13 +36,20 @@ public enum Xt1Format : uint
     Bc1Srgb = 0x46,
     Bc2Srgb = 0x47,
     Bc3Srgb = 0x48,
-    Bc4Snorm = 0x49,
+
+    /// <summary>
+    /// Alternate BC4_UNORM id (the one other tools label "BC4_SNORM"). Testing shows the payload is
+    /// unsigned, so it is handled exactly like <see cref="Bc4Unorm"/>; kept as its own value so the
+    /// record's original id round-trips.
+    /// </summary>
+    Bc4UnormAlt = 0x49,
 
     /// <summary>Unverified in BT3.</summary>
     Bc5Unorm = 0x4A,
 
-    /// <summary>Unverified in BT3.</summary>
-    Bc5Snorm = 0x4B,
+    /// <summary>Alternate BC5_UNORM id (the one other tools label "BC5_SNORM"); unsigned like
+    /// <see cref="Bc5Unorm"/>. Kept so the record's id round-trips.</summary>
+    Bc5UnormAlt = 0x4B,
 
     /// <summary>BC6H unsigned float (HDR). Used for cubemaps.</summary>
     Bc6hUf16 = 0x50,
@@ -52,6 +59,16 @@ public enum Xt1Format : uint
 
     /// <summary>Unverified in BT3.</summary>
     Bc7Srgb = 0x52,
+
+    /// <summary>
+    /// BC7_UNORM under the id current community mods use. Same 16-byte BC7 blocks as
+    /// <see cref="Bc7Unorm"/>, so it decodes and re-encodes identically; kept as a separate value
+    /// so a bank's original format id is reported instead of being silently rewritten on load.
+    /// </summary>
+    Bc7UnormAlt = 0x4D,
+
+    /// <summary>BC7_SRGB under the id current community mods use. Same as <see cref="Bc7Srgb"/>.</summary>
+    Bc7SrgbAlt = 0x4E,
 
     /// <summary>
     /// Format 0x6D, observed only on 3D textures (16x16x32). Uncompressed 32bpp: the section 6

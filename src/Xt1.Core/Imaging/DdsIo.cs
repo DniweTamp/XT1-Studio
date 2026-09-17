@@ -43,9 +43,9 @@ public static class DdsIo
         [77] = Xt1Format.Bc3Unorm,
         [78] = Xt1Format.Bc3Srgb,
         [80] = Xt1Format.Bc4Unorm,
-        [81] = Xt1Format.Bc4Snorm,
+        [81] = Xt1Format.Bc4UnormAlt,
         [83] = Xt1Format.Bc5Unorm,
-        [84] = Xt1Format.Bc5Snorm,
+        [84] = Xt1Format.Bc5UnormAlt,
         [95] = Xt1Format.Bc6hUf16,
         [98] = Xt1Format.Bc7Unorm,
         [99] = Xt1Format.Bc7Srgb,
@@ -53,20 +53,35 @@ public static class DdsIo
 
     private static readonly Dictionary<Xt1Format, uint> Xt1ToDxgi;
 
-    // ASTC LDR DXGI formats are laid out as TYPELESS/UNORM/SRGB triples starting at 133, so for
-    // footprint i the UNORM value is 134 + 3i and the sRGB value 135 + 3i (i = 0..13). Added here
-    // (not in DxgiToXt1's initializer) so the reverse Xt1ToDxgi map below sees them.
+    // ASTC LDR DXGI ids occupy 133..188, four slots per footprint (i = 0..13): the UNORM value is
+    // 134 + 4i and the sRGB value 135 + 4i. This is NVIDIA's numbering (stride 4), which is what
+    // NVTT writes and what its GUI/nvddsinfo read; a stride-3 table silently maps a footprint to a
+    // neighbouring one (8x6 -> 10x5). Added in the static constructor so the reverse Xt1ToDxgi map
+    // below sees the entries.
     static DdsIo()
     {
         for (int i = 0; i < FormatTable.AstcFootprintNames.Length; i++)
         {
-            DxgiToXt1[134u + (uint)(3 * i)] = (Xt1Format)(0x79 + i);
-            DxgiToXt1[135u + (uint)(3 * i)] = (Xt1Format)(0x87 + i);
+            DxgiToXt1[134u + (uint)(4 * i)] = (Xt1Format)(0x79 + i);
+            DxgiToXt1[135u + (uint)(4 * i)] = (Xt1Format)(0x87 + i);
         }
         Xt1ToDxgi = DxgiToXt1.GroupBy(kv => kv.Value).ToDictionary(g => g.Key, g => g.First().Key);
+
+        // Aliases export under their canonical format's DXGI id (e.g. the unsigned 0x49/0x4B export
+        // as 80/83 even though the SNORM tags 81/84 are what imported them). One derivation from
+        // FormatTable.AliasOf, so adding an alias cannot leave this table stale.
+        foreach (var alias in FormatTable.Aliases)
+        {
+            if (Xt1ToDxgi.TryGetValue(alias.AliasOf!.Value, out uint canonicalDxgi))
+                Xt1ToDxgi[alias.Format] = canonicalDxgi;
+        }
     }
 
     public static bool CanExport(FormatInfo format) => Xt1ToDxgi.ContainsKey(format.Format);
+
+    /// <summary>The DXGI format an XT1 format exports as (an alias exports as its canonical id).</summary>
+    public static bool TryGetDxgi(FormatInfo format, out uint dxgi) =>
+        Xt1ToDxgi.TryGetValue(format.Format, out dxgi);
 
     public static bool IsDds(ReadOnlySpan<byte> data) =>
         data.Length >= 4 && Mem.ReadU32LE(data, 0) == Magic;
@@ -159,19 +174,32 @@ public static class DdsIo
 
         int arraySize = isCube ? Math.Max(1, faceCount / 6) : Math.Max(1, faceCount);
         bool volume = depth > 1;
+        bool blockCompressed = format.Codec != CodecKind.Raw;
+        int mip0Size = SurfaceSize(format, width, height, 1);
+
+        // Flags follow what NVTT writes so its reader accepts the file: block formats declare
+        // DDSD_LINEARSIZE (not DDSD_PITCH), and the mipmap count flag is always set.
+        uint flags = 0x1u | 0x2u | 0x4u | 0x1000u | 0x20000u
+                     | (blockCompressed ? 0x80000u : 0x8u);
+        // dwCaps1: TEXTURE | COMPLEX, plus MIPMAP when a chain is present.
+        uint caps1 = 0x1000u | 0x8u | (mipCount > 1 ? 0x400000u : 0u);
+        // dwCaps2 carries the cube/volume bits (they do not belong in dwCaps1).
+        uint caps2 = volume ? 0x200000u : isCube ? (0x200u | 0xFC00u) : 0u;
 
         var header = new byte[0x94];
         Mem.WriteU32LE(header, 0x00, Magic);
         Mem.WriteU32LE(header, 0x04, 124);
-        Mem.WriteU32LE(header, 0x08, 0x0002100F); // standard texture flags
+        Mem.WriteU32LE(header, 0x08, flags);
         Mem.WriteU32LE(header, 0x0C, (uint)height);
         Mem.WriteU32LE(header, 0x10, (uint)width);
+        Mem.WriteU32LE(header, 0x14, blockCompressed ? (uint)mip0Size : (uint)width * (uint)format.BytesPerBlock);
         Mem.WriteU32LE(header, 0x18, (uint)depth);
         Mem.WriteU32LE(header, 0x1C, (uint)mipCount);
         Mem.WriteU32LE(header, 0x4C, 32);        // pixel format size
         Mem.WriteU32LE(header, 0x50, 0x4);       // DDPF_FOURCC
         Mem.WriteU32LE(header, 0x54, 0x30315844); // "DX10"
-        Mem.WriteU32LE(header, 0x6C, 0x1000 | 0x8 | (volume ? 0x200000u : 0u) | (isCube ? 0x200u : 0u));
+        Mem.WriteU32LE(header, 0x6C, caps1);
+        Mem.WriteU32LE(header, 0x70, caps2);
 
         Mem.WriteU32LE(header, 0x80, dxgi);
         Mem.WriteU32LE(header, 0x84, volume ? 4u : 3u); // resourceDimension 3D / 2D

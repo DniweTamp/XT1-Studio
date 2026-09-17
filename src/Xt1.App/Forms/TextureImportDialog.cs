@@ -11,6 +11,16 @@ public sealed class TextureImportDialog : Form
     private readonly ComboBox _backend = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
     private readonly ComboBox _quality = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
     private readonly CheckBox _mips = new() { Text = "Generate full mip chain", AutoSize = true };
+    private readonly CheckBox _solidify = new()
+    {
+        Text = "Solidify (edge-pad transparent RGB from the nearest opaque colour)",
+        AutoSize = true,
+    };
+    private readonly CheckBox _opaque = new()
+    {
+        Text = "Force opaque (set alpha to 255)",
+        AutoSize = true,
+    };
     private readonly List<FormatInfo> _formats;
 
     public FormatInfo SelectedFormat => _formats[_format.SelectedIndex];
@@ -21,8 +31,27 @@ public sealed class TextureImportDialog : Form
 
     public bool GenerateMips => _mips.Checked;
 
+    /// <summary>Edge-pad the RGB of transparent texels before encoding (avoids dark halos).</summary>
+    public bool Solidify => _solidify.Checked;
+
+    /// <summary>Set the encoded texture's alpha to 255 everywhere.</summary>
+    public bool MakeOpaque => _opaque.Checked;
+
+    /// <summary>Test hook: the target-format labels as shown in the dropdown.</summary>
+    internal IReadOnlyList<string> UiTestFormatItems() =>
+        _format.Items.Cast<object>().Select(item => item.ToString() ?? string.Empty).ToList();
+
+    /// <summary>Test hook: the option labels with their default state.</summary>
+    internal IReadOnlyList<string> UiTestOptionLabels() => new[]
+    {
+        $"{_mips.Text}|{_mips.Checked}",
+        $"{_solidify.Text}|{_solidify.Checked}",
+        $"{_opaque.Text}|{_opaque.Checked}",
+    };
+
     public TextureImportDialog(string sourceDescription, RgbaImage preview, FormatInfo currentFormat,
-        EncoderBackend backend, EncodeQuality quality, bool generateMips)
+        EncoderBackend backend, EncodeQuality quality, bool generateMips, bool solidify = false,
+        bool makeOpaque = false)
     {
         Text = "Import texture";
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -30,15 +59,17 @@ public sealed class TextureImportDialog : Form
         MinimizeBox = false;
         MaximizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(520, 300);
+        ClientSize = new Size(620, 360);
 
+        // Aliases (community BC7 at 0x4D/0x4E) are offered alongside the canonical id so a mod that
+        // uses them can be authored or updated; the id in the label tells the two apart.
         _formats = FormatTable.All
             .Where(f => f.Codec is CodecKind.Bc or CodecKind.Astc or CodecKind.Raw)
             .OrderBy(f => f.Value)
             .ToList();
 
         foreach (var format in _formats)
-            _format.Items.Add($"{format.Name} ({format.Value})");
+            _format.Items.Add(format.DisplayName);
         int index = _formats.FindIndex(f => f.Format == currentFormat.Format);
         _format.SelectedIndex = index >= 0 ? index : _formats.FindIndex(f => f.Format == Xt1Format.Bc7Unorm);
 
@@ -47,6 +78,8 @@ public sealed class TextureImportDialog : Form
         _quality.Items.AddRange(new object[] { EncodeQuality.Fastest, EncodeQuality.Normal, EncodeQuality.Production, EncodeQuality.Highest });
         _quality.SelectedItem = quality;
         _mips.Checked = generateMips;
+        _solidify.Checked = solidify;
+        _opaque.Checked = makeOpaque;
 
         var table = new TableLayoutPanel
         {
@@ -64,6 +97,15 @@ public sealed class TextureImportDialog : Form
         Add(table, ref row, "Encoder backend", _backend);
         Add(table, ref row, "Quality", _quality);
         Add(table, ref row, string.Empty, _mips);
+        Add(table, ref row, "Transparent RGB", _solidify);
+        Add(table, ref row, "Alpha", _opaque);
+
+        var tips = new ToolTip();
+        tips.SetToolTip(_solidify,
+            "Fill the colour of fully transparent pixels from the nearest opaque pixels before " +
+            "encoding, so filtering and block compression do not leave a dark fringe. Alpha is kept.");
+        tips.SetToolTip(_opaque,
+            "Replace the alpha channel with 255, making the imported texture fully opaque.");
 
         var ok = new Button { Text = "Import", DialogResult = DialogResult.OK, AutoSize = true };
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, AutoSize = true };

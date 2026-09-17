@@ -113,8 +113,7 @@ public static class NvttFormatMap
     }
 
     /// <summary>
-    /// The nvtt_export 3.2.5 <c>-f</c> ids, parsed from the installed <c>--help</c>. Note that the
-    /// CLI exposes no signed BC4/BC5 ids, so those formats are in-process only.
+    /// The nvtt_export 3.2.5 <c>-f</c> ids, parsed from the installed <c>--help</c>.
     /// </summary>
     private static readonly IReadOnlyDictionary<string, int> CliFormatIds =
         new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
@@ -168,10 +167,6 @@ public static class NvttFormatMap
         Add(Xt1Format.Bc7Unorm, NvttFormat.Bc7, "bc7");
         Add(Xt1Format.Bc7Srgb, NvttFormat.Bc7, "bc7");
 
-        // Signed BC4/BC5 are supported in-process (no CLI id exists in nvtt_export 3.2.5).
-        Add(Xt1Format.Bc4Snorm, NvttFormat.Bc4S, cliName: null);
-        Add(Xt1Format.Bc5Snorm, NvttFormat.Bc5S, cliName: null);
-
         for (int i = 0; i < FormatTable.AstcFootprintNames.Length; i++)
         {
             var unorm = (Xt1Format)(0x79 + i);
@@ -180,6 +175,14 @@ public static class NvttFormatMap
             string cliName = "astc-ldr-" + FormatTable.AstcFootprintNames[i];
             Add(unorm, nvtt, cliName);
             Add(srgb, nvtt, cliName);
+        }
+
+        // Aliases inherit their canonical format's support; FormatTable is the only place an alias
+        // is declared, so this cannot fall out of step with the managed and DDS tables.
+        foreach (var alias in FormatTable.Aliases)
+        {
+            if (map.TryGetValue(alias.AliasOf!.Value, out var support))
+                map[alias.Format] = support with { Format = alias.Format };
         }
 
         return map;

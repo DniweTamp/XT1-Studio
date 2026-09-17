@@ -71,10 +71,11 @@ public sealed class SettingsDialog : Form
         _backend.Items.AddRange(new object[] { EncoderBackend.Nvtt, EncoderBackend.Managed, EncoderBackend.Cli });
         _backend.SelectedItem = settings.PreferredBackend;
 
-        var formats = FormatTable.All.Where(f => f.Codec is CodecKind.Bc or CodecKind.Astc or CodecKind.Raw)
+        var formats = FormatTable.All
+            .Where(f => f.Codec is CodecKind.Bc or CodecKind.Astc or CodecKind.Raw)
             .OrderBy(f => f.Value).ToList();
         foreach (var format in formats)
-            _defaultFormat.Items.Add($"{format.Name} ({format.Value})");
+            _defaultFormat.Items.Add(format.DisplayName);
         int selected = formats.FindIndex(f => f.Format == settings.DefaultImportFormat);
         _defaultFormat.SelectedIndex = selected >= 0 ? selected : 0;
 
@@ -116,9 +117,7 @@ public sealed class SettingsDialog : Form
         AddRow(grid, ref row, "nvtt30205.dll", _nvttDll, MakeBrowse(_nvttDll));
         AddRow(grid, ref row, "nvtt_export.exe", _nvttCli, MakeBrowse(_nvttCli));
         AddHint(grid, ref row, "Leave blank to auto-detect, or point at a custom install.");
-
-        AddSection(grid, ref row, "Settings file");
-        AddHint(grid, ref row, AppSettings.SettingsPath, wrap: true);
+        // The settings file lives next to the executable; no need to spend a section on it.
 
         var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, AutoSize = true };
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, AutoSize = true };
@@ -185,15 +184,14 @@ public sealed class SettingsDialog : Form
         row++;
     }
 
-    private static void AddHint(TableLayoutPanel grid, ref int row, string text, bool wrap = false)
+    private static void AddHint(TableLayoutPanel grid, ref int row, string text)
     {
         var label = new Label
         {
             Text = text,
-            AutoSize = !wrap,
+            AutoSize = true,
             ForeColor = Color.FromArgb(112, 112, 124),
             Margin = new Padding(0, 1, 0, 4),
-            MaximumSize = wrap ? new Size(620, 0) : Size.Empty,
         };
         grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         grid.Controls.Add(label, 0, row);

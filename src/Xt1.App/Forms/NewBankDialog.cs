@@ -5,7 +5,8 @@ public sealed class NewBankDialog : Form
 {
     private readonly RadioButton _wta = new()
     {
-        Text = "Effect bank (.wta + .wtp)\r\nA header file plus a separate payload stream.",
+        Text = "Split bank (.wta + .wtp)\r\nA header file plus a separate payload stream. This layout\r\n" +
+               "is used all over the game (models, UI, effects), not just for effects.",
         AutoSize = true,
         Checked = true,
     };
@@ -26,7 +27,7 @@ public sealed class NewBankDialog : Form
         MinimizeBox = false;
         MaximizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(430, 170);
+        ClientSize = new Size(470, 220);
 
         var panel = new FlowLayoutPanel
         {

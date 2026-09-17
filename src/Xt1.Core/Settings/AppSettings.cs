@@ -13,8 +13,10 @@ public sealed class AppSettings
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public EncoderBackend PreferredBackend { get; set; } = EncoderBackend.Nvtt;
 
+    /// <summary>Format the import dialog preselects for image imports. ASTC 8x8 sRGB (0x8E) matches
+    /// what most of the game's textures use.</summary>
     [JsonConverter(typeof(JsonStringEnumConverter))]
-    public Xt1Format DefaultImportFormat { get; set; } = Xt1Format.Bc7Unorm;
+    public Xt1Format DefaultImportFormat { get; set; } = Xt1Format.Astc8x8Srgb;
 
     public bool ApplySrgbPreview { get; set; } = true;
 

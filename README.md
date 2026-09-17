@@ -104,6 +104,10 @@ These were re-derived from `D:\Bayonetta3\romfs` and are locked by tests:
 | Wide-pitch chain | `em305c` #2 (ASTC 5×5 2050x2050, 11 mips) decomposes exactly: pitches `[7168,4096,2048,832,448,256,128,64,64,64,64]`, total 4596736. The pitch must be fed to the swizzle or the magenta padding leaks in (3072 → 6 pixels, 2752 → 78,594). The 47 single-mip cases are the same mechanism; the stored-size back-solve is now only a fallback and no longer fires |
 | Cube faces | A face is `align4096`-ed **only when its base mip surface reaches 4096 bytes**, never when the whole chain merely exceeds a page: 8x8 BC3s → 512/face (dense), BC1 64x64/7 → 5120/face (dense, total 30720), BC3 64x64/7 → 8192/face (total 49152) |
 | Formats | `0x01` (`"af"`) is a single uncompressed 8-bit channel at 1 byte/px (not compressed — corrected, see below); `0x6D` is uncompressed 32 bpp (decode-only, channel order unconfirmed) |
+| BC7 aliases | `0x4D`/`0x4E` are BC7_UNORM/BC7_SRGB as current community mods store them. They share the canonical `0x51`/`0x52` BC7 blocks, so they decode and re-encode identically and are offered as target formats in the import dialog (labeled `BC7_UNORM (0x4D, community)` vs `BC7_UNORM (0x51)`), so a bank can be authored with the id its mod tooling expects |
+| BC4/BC5 aliases | `0x49`/`0x4B` are labelled `BC4_SNORM`/`BC5_SNORM` by other tools, but testing shows the payloads are unsigned, so they are treated as BC4/BC5_UNORM aliases of `0x45`/`0x4A` (decode, encode and DDS export as UNORM). No SNORM id is known in the game data |
+| Alias source | An alias is declared once, as `FormatInfo.AliasOf` in `FormatTable`. The managed codec map, the NVTT capability table and the DDS DXGI table all derive their alias entries from it (resolve-to-canonical or copy), so adding an alias is a one-place edit and the tables cannot drift |
+| ASTC in DDS | ASTC DDS uses NVIDIA's DXGI ids, four slots per footprint: UNORM `134 + 4i`, sRGB `135 + 4i` (8x6 = 158, 8x8 = 162, 10x5 = 166). A stride-3 table maps a footprint to its neighbour, so 8x6 imports as 10x5. The DX10 header also follows NVTT's convention (`DDSD_LINEARSIZE` for block formats, `DDSCAPS_TEXTURE\|COMPLEX\|MIPMAP`, cube/volume bits in `dwCaps2`), which its reader requires. Verified both ways against `nvtt_export`/`nvddsinfo` |
 | Hash | `crc32(name) & 0x7FFFFFFF`, masked, never auto-overwritten |
 
 ## Layout
@@ -111,7 +115,7 @@ These were re-derived from `D:\Bayonetta3\romfs` and are locked by tests:
 ```
 src/Xt1.Core   net8.0, no UI: containers, XT1 model, swizzle, layout, codecs, NVTT interop, writers, editing
 src/Xt1.App    net8.0-windows: WinForms shell, GDI+ 2D viewer, OpenGL cubemap/volume viewport, dialogs
-tests/Xt1.Core.Tests  418 tests, real-file validation against D:\Bayonetta3\romfs when present
+tests/Xt1.Core.Tests  441 tests, real-file validation against D:\Bayonetta3\romfs when present
 ```
 
 `Xt1.Core` is headless and fully testable; the app only consumes it.
@@ -119,7 +123,7 @@ tests/Xt1.Core.Tests  418 tests, real-file validation against D:\Bayonetta3\romf
 ## Features
 
 - Open `.wta`, `.dat`, `.dtt`, `.wtb`, `.xt1`; a `.dat` pairs automatically with its `.dtt`
-  (and vice versa), and a split effect `.wta` automatically pairs with its sibling `.wtp`.- Collapsible container tree. Banks reach it under two tags: `"wta"` (whose payload is paired from
+  (and vice versa), and a split `.wta` automatically pairs with its sibling `.wtp`.- Collapsible container tree. Banks reach it under two tags: `"wta"` (whose payload is paired from
   the `"wtp"` sub-files) and `"wtb"` (a standalone bank carrying its payload inline). A container
   with several banks gets one branch per bank, labeled with the DAT's own sub-file name. There is no
   separate bank selector: every bank is already a branch of the same tree. Single-bank containers keep
@@ -214,9 +218,17 @@ tests/Xt1.Core.Tests  418 tests, real-file validation against D:\Bayonetta3\romf
     the status line says so when that happens.
 
 - Import/replace from an image or a DDS (a DDS is copied in losslessly with its own mips; adding a
-  DDS works too), add/delete textures, per-texture export to PNG / DDS / raw `.xt1`, and a bank- or
+  DDS works too). The image import dialog offers **Solidify** (edge-pad the RGB of fully transparent
+  texels from the nearest opaque colour, so filtering/BC compression does not leave a dark halo) and
+  **Force opaque** (set alpha to 255); both work with either encoder since they act on the decoded
+  image, and when both are ticked solidify runs first (while the cutout still exists) and the opaque
+  conversion second. The bundled NVTT CLI has no solidify switch, so this is the equivalent of its GUI's
+  "Edge Pad (Solidify)" pass. Also: add/delete textures, per-texture export to PNG / DDS / raw `.xt1` (a DDS export of
+a 3D volume carries every depth slice of each level and writes `resourceDimension = TEXTURE3D`), and a bank- or
   container-wide PNG export. All of it is in the tree's right-click menu.
-- **File → New empty bank...** authors a fresh `.wta`+`.wtp` or standalone `.wtb` with no textures.
+- **File → New empty bank...** authors a fresh `.wta`+`.wtp` (split bank, the layout most of the game
+  uses) or standalone `.wtb` with no textures. An empty bank still enables *Add texture from image...*
+  in the tree menu so it can be filled.
 - **Tools → Batch recompress (ASTC to BC)**: re-encodes ASTC textures to BC1/BC3/BC7, keeping the
   existing mip levels (none are regenerated) and only touching textures that decode cleanly. Optional
   half-size downscale (drops mip 0 when a chain exists, otherwise box-filters a single-mip image,
@@ -240,9 +252,8 @@ encoder is the fallback.
 - **NVTT** (`nvtt30205.dll`, in-process P/Invoke, output captured via an output handler; one
   surface at a time, swizzled and packed by us) — preferred, handles BC1–BC7, BC6H and all 14
   ASTC footprints.
-- **nvtt_export CLI** — fallback; `--help` is probed once and the required flags are verified.
-  `nvtt_export` 3.2.5 exposes no signed BC4/BC5 ids, so those two formats are in-process only;
-  the capability table reports that explicitly instead of letting the backends disagree.
+- **nvtt_export CLI** — fallback; `--help` is probed once and the required flags are verified, and
+  the capability table reports which formats each backend covers instead of letting them disagree.
 - **Managed** (`BCnEncoder.Net` for BC1–BC5/BC7, `AstcSharp` for ASTC, raw copy) — zero external
   dependencies; this is what decodes previews and what encodes when NVTT is missing.
 
@@ -256,10 +267,9 @@ sRGB, and the real table comes from `XT1_FORMAT.md`.
 
 - **3D editing** is view-only. Volumes decode correctly (depth-interleaved) and preview assembled in
   the 3D viewport, but re-encoding a volume is rejected rather than approximated.
-- Signed BC4/BC5 and BC6H encoding are NVTT-only: the managed path reports them as unsupported
-  instead of writing blocks with the wrong signedness, so without NVTT those formats are refused
-  rather than silently mis-encoded. Only the tool paths NVTT actually consumes are configurable
-  (`nvtt30205.dll`, `nvtt_export.exe`).
+- BC6H encoding is NVTT-only: the managed path reports it as unsupported instead of writing the
+  wrong blocks, so without NVTT it is refused rather than silently mis-encoded. Only the tool paths
+  NVTT actually consumes are configurable (`nvtt30205.dll`, `nvtt_export.exe`).
 - Alpha / binary-alpha and the `0x2C` textureFlag semantics are still unknown; they are exposed as
   free-form editable fields and preserved verbatim rather than interpreted.
 - No known unexplained layout mismatches remain: the former wide-pitch (multi-mip ASTC) and

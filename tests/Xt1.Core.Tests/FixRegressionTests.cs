@@ -205,11 +205,12 @@ public class FixRegressionTests
     [Fact]
     public void NvttSupport_IsConsistentBetweenBackends()
     {
-        // Signed BC4/BC5 exist in-process but have no nvtt_export CLI id.
-        Assert.True(NvttFormatMap.InProcessSupports(Xt1Format.Bc4Snorm));
-        Assert.False(NvttFormatMap.CliSupports(Xt1Format.Bc4Snorm));
-        Assert.True(NvttFormatMap.InProcessSupports(Xt1Format.Bc5Snorm));
-        Assert.False(NvttFormatMap.CliSupports(Xt1Format.Bc5Snorm));
+        // The alternate BC4/BC5 ids are unsigned, so they use the plain bc4/bc5 formats and work on
+        // both backends.
+        Assert.True(NvttFormatMap.InProcessSupports(Xt1Format.Bc4UnormAlt));
+        Assert.True(NvttFormatMap.CliSupports(Xt1Format.Bc4UnormAlt));
+        Assert.True(NvttFormatMap.InProcessSupports(Xt1Format.Bc5UnormAlt));
+        Assert.True(NvttFormatMap.CliSupports(Xt1Format.Bc5UnormAlt));
 
         foreach (var format in new[]
                  {
@@ -368,32 +369,30 @@ public class FixRegressionTests
     }
 
     /// <summary>
-    /// The managed path must not claim signed BC4/BC5: BCnEncoder's Bc4/Bc5 are unsigned, so claiming
-    /// them decoded signed data as unsigned and re-encoded it as unsigned under a SNORM header. They
-    /// route to NVTT, which has BC4_SIGNED/BC5_SIGNED.
+    /// The alternate 0x49/0x4B ids are BC4/BC5_UNORM (testing showed the payload is unsigned even
+    /// though other tools label them SNORM), so the managed path handles them exactly like 0x45/0x4A.
     /// </summary>
     [Fact]
-    public void ManagedPath_DoesNotClaimSignedBc4OrBc5()
+    public void ManagedPath_HandlesUnsignedBc4AndBc5Alternates()
     {
-        var bc4Snorm = FormatTable.Get(Xt1Format.Bc4Snorm)!;
-        var bc5Snorm = FormatTable.Get(Xt1Format.Bc5Snorm)!;
+        var bc4Alt = FormatTable.Get(Xt1Format.Bc4UnormAlt)!;
+        var bc5Alt = FormatTable.Get(Xt1Format.Bc5UnormAlt)!;
         var bc4Unorm = FormatTable.Get(Xt1Format.Bc4Unorm)!;
         var bc5Unorm = FormatTable.Get(Xt1Format.Bc5Unorm)!;
 
-        Assert.False(ManagedFormatMap.SupportsDecode(bc4Snorm));
-        Assert.False(ManagedFormatMap.SupportsEncode(bc4Snorm));
-        Assert.False(ManagedFormatMap.SupportsDecode(bc5Snorm));
-        Assert.False(ManagedFormatMap.SupportsEncode(bc5Snorm));
+        Assert.True(ManagedFormatMap.SupportsDecode(bc4Alt));
+        Assert.True(ManagedFormatMap.SupportsEncode(bc4Alt));
+        Assert.True(ManagedFormatMap.SupportsDecode(bc5Alt));
+        Assert.True(ManagedFormatMap.SupportsEncode(bc5Alt));
 
-        // The unsigned variants stay in the managed path.
+        // Canonical unsigned variants are unaffected.
         Assert.True(ManagedFormatMap.SupportsDecode(bc4Unorm));
         Assert.True(ManagedFormatMap.SupportsEncode(bc4Unorm));
         Assert.True(ManagedFormatMap.SupportsDecode(bc5Unorm));
         Assert.True(ManagedFormatMap.SupportsEncode(bc5Unorm));
 
-        // ... and NVTT still covers the signed ones, so nothing became unencodable.
-        Assert.True(NvttFormatMap.InProcessSupports(Xt1Format.Bc4Snorm));
-        Assert.True(NvttFormatMap.InProcessSupports(Xt1Format.Bc5Snorm));
+        Assert.True(NvttFormatMap.InProcessSupports(Xt1Format.Bc4UnormAlt));
+        Assert.True(NvttFormatMap.InProcessSupports(Xt1Format.Bc5UnormAlt));
     }
 
     /// <summary>The layout cache must reflect header edits (imageSize drives SizeMatches).</summary>

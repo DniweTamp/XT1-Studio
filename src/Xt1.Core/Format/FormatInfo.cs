@@ -13,6 +13,26 @@ public sealed record FormatInfo(
 {
     public uint Value => (uint)Format;
 
+    /// <summary>
+    /// The canonical format this entry is an alternate id for (e.g. community BC7 at 0x4D/0x4E, or
+    /// the unsigned BC4/BC5 alternates at 0x49/0x4B), or null for a canonical format. This is the
+    /// single source of truth for aliasing: the codec maps, the NVTT capability table and the DDS
+    /// DXGI table all derive their alias entries from it instead of listing them again.
+    /// </summary>
+    public Xt1Format? AliasOf { get; init; }
+
+    /// <summary>True when this entry is an alternate id for another format.</summary>
+    public bool IsAlias => AliasOf is not null;
+
+    /// <summary>The format itself, or the canonical format when this is an alias.</summary>
+    public Xt1Format Canonical => AliasOf ?? Format;
+
+    /// <summary>Name with its id, so two entries that share a name (canonical vs alias) are distinct
+    /// in pickers and reports.</summary>
+    public string DisplayName => IsAlias
+        ? $"{Name} (0x{Value:X2}, community)"
+        : $"{Name} (0x{Value:X2})";
+
     public int WidthBlocks(int pixelWidth) => Util.Mem.DivUp(Math.Max(1, pixelWidth), BlockWidth);
     public int HeightBlocks(int pixelHeight) => Util.Mem.DivUp(Math.Max(1, pixelHeight), BlockHeight);
 
