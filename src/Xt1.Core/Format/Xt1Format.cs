@@ -54,21 +54,15 @@ public enum Xt1Format : uint
     /// <summary>BC6H unsigned float (HDR). Used for cubemaps.</summary>
     Bc6hUf16 = 0x50,
 
-    /// <summary>Unverified in BT3.</summary>
-    Bc7Unorm = 0x51,
-
-    /// <summary>Unverified in BT3.</summary>
-    Bc7Srgb = 0x52,
-
     /// <summary>
-    /// BC7_UNORM under the id current community mods use. Same 16-byte BC7 blocks as
-    /// <see cref="Bc7Unorm"/>, so it decodes and re-encodes identically; kept as a separate value
-    /// so a bank's original format id is reported instead of being silently rewritten on load.
+    /// BC7_UNORM under the id Bayonetta 3 mods use. Round-trip testing confirms the payload is
+    /// standard 16-byte BC7 blocks. The 0x51/0x52 ids other tools listed as BC7 are a different
+    /// format and are deliberately not mapped, so this is the only BC7_UNORM the tool understands.
     /// </summary>
-    Bc7UnormAlt = 0x4D,
+    Bc7Unorm = 0x4D,
 
-    /// <summary>BC7_SRGB under the id current community mods use. Same as <see cref="Bc7Srgb"/>.</summary>
-    Bc7SrgbAlt = 0x4E,
+    /// <summary>BC7_SRGB (0x4E), the sRGB pair of <see cref="Bc7Unorm"/>.</summary>
+    Bc7Srgb = 0x4E,
 
     /// <summary>
     /// Format 0x6D, observed only on 3D textures (16x16x32). Uncompressed 32bpp: the section 6

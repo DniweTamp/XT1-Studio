@@ -62,8 +62,8 @@ public sealed class TextureImportDialog : Form
         ShowInTaskbar = false;
         ClientSize = new Size(620, 360);
 
-        // Aliases (community BC7 at 0x4D/0x4E) are offered alongside the canonical id so a mod that
-        // uses them can be authored or updated; the id in the label tells the two apart.
+        // Every encodable format is offered. BC7 is the 0x4D/0x4E pair the game actually uses; the
+        // id in the label makes it explicit for anyone checking against other tools.
         _formats = FormatTable.All
             .Where(f => f.Codec is CodecKind.Bc or CodecKind.Astc or CodecKind.Raw)
             .OrderBy(f => f.Value)

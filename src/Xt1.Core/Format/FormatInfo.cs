@@ -14,8 +14,8 @@ public sealed record FormatInfo(
     public uint Value => (uint)Format;
 
     /// <summary>
-    /// The canonical format this entry is an alternate id for (e.g. community BC7 at 0x4D/0x4E, or
-    /// the unsigned BC4/BC5 alternates at 0x49/0x4B), or null for a canonical format. This is the
+    /// The canonical format this entry is an alternate id for (e.g. the unsigned BC4/BC5 alternates
+    /// at 0x49/0x4B), or null for a canonical format. This is the
     /// single source of truth for aliasing: the codec maps, the NVTT capability table and the DDS
     /// DXGI table all derive their alias entries from it instead of listing them again.
     /// </summary>

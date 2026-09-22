@@ -1,28 +1,50 @@
+# ---------------------------------------------------------------------------
 # Build output
+# ---------------------------------------------------------------------------
 bin/
 obj/
+artifacts/
 publish/
 publish-*/
+[Oo]ut/
+*.binlog
+*.tlog
+*.idb
+*.ilk
+*.obj
+*.o
+*.pdb
+*.dll
+*.exe
+*.so
+*.dylib
+*.cache
 
-# ReSharper / Rider
-.idea/
-_ReSharper*/
-*.DotSettings
-*.DotSettings.user
-*.DotCover
+# ---------------------------------------------------------------------------
+# Test / coverage output
+# ---------------------------------------------------------------------------
+TestResults/
+**/TestResults/
+*.testrun
+*.trx
 *.coverage
 *.coverage.xml
-*.run
-*.runconfig
+*.cobertura.xml
+coverage*.json
+coverage*.xml
+*.received.*
+*_Visible-D41d8cd9-
 
+# ---------------------------------------------------------------------------
 # Visual Studio
+# ---------------------------------------------------------------------------
+.vs/
 *.user
+*.suo
 *.userosscache
+*.userprefs
 *.sln.docstates
 *.sln.docstates.s
-*.suo
-*.userprefs
-*.vs/
 *.VC.db
 *.VC.VC.opendb
 *.aps
@@ -34,26 +56,59 @@ _ReSharper*/
 *.tlb
 *.tlh
 *.tli
+*.dbmdl
+*.opendb
+*.svclog
+*.pidb
+
+# ReSharper / Rider
+.idea/
+_ReSharper*/
+*.DotSettings
+*.DotSettings.user
+*.DotCover
+*.run
+*.runconfig
+*.rsuser
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Scratch / editor swap files
 *.tmp
 *.temp
 *.tmp.*
 *.bak
-*.err
+*.orig
+*.rej
+*.swp
+*.swo
+*~
 *.log
+*.err
+*.stackdump
+.localhistory/
+.history/
 
+# ---------------------------------------------------------------------------
 # NuGet
+# ---------------------------------------------------------------------------
 packages/
-**/.nuget/*
-**/.nuget/**/global.json
-**/.nuget/**/*.props
-**/.nuget/**/*.targets
+project.lock.json
+project.assets.json
 *.nuget.config
+*.nuget.dgspec.json
+*.nupkg
+*.snupkg
 nuget.exe
 NuGet.exe
 NuGetScratch
-*.nuget.dgspec.json
+.dotnet/
 
-# .NET
+# ---------------------------------------------------------------------------
+# .NET generated files
+# ---------------------------------------------------------------------------
 *.deps.json
 *.runtimeconfig.json
 *.runtimeconfig.template.json
@@ -69,26 +124,29 @@ NuGetScratch
 *.GeneratedMSBuildEditorConfig.editorconfig
 *.genbundle.cache
 *.genpublishdeps.cache
-*.dll
-*.exe
-*.pdb
-*.cache
-TestResults/
-**/TestResults/
-*.testrun
-*_Visible-D41d8cd9-
 
-# Project
+# ---------------------------------------------------------------------------
+# Signing / secrets
+# ---------------------------------------------------------------------------
 *.pfx
 *.p12
 *.key
 *.key.user
+*.snk
 
-# VS Code
-.vscode/
-*.code-workspace
+# ---------------------------------------------------------------------------
+# Local project state
+# ---------------------------------------------------------------------------
+# The app persists this next to the executable; ignore a stray copy if it is
+# launched from the repository root during development.
+settings.json
 
-# OS
+# Kilo (local agent config and worktrees)
+.kilo/
+
+# ---------------------------------------------------------------------------
+# OS junk
+# ---------------------------------------------------------------------------
 Thumbs.db
 Thumbs.db:encryptable
 ehthumbs.db
@@ -112,6 +170,3 @@ Network Trash Folder
 Temporary Items
 .apdisk
 .SymLink
-
-# Kilo (local agent config)
-.kilo/

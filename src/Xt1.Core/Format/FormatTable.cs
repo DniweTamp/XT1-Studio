@@ -55,18 +55,11 @@ public static class FormatTable
                 AliasOf = Xt1Format.Bc5Unorm,
             },
             new(Xt1Format.Bc6hUf16, "BC6H_UF16", 4, 4, 16, CodecKind.Bc, false, true),
-            new(Xt1Format.Bc7Unorm, "BC7_UNORM", 4, 4, 16, CodecKind.Bc, false, false),
-            new(Xt1Format.Bc7Srgb, "BC7_SRGB", 4, 4, 16, CodecKind.Bc, true, false),
-            // Community/legacy ids for the same BC7 payloads. Verified because the blocks are the
-            // canonical BC7 blocks, not a distinct format the tool has never round-tripped.
-            new(Xt1Format.Bc7UnormAlt, "BC7_UNORM", 4, 4, 16, CodecKind.Bc, false, true)
-            {
-                AliasOf = Xt1Format.Bc7Unorm,
-            },
-            new(Xt1Format.Bc7SrgbAlt, "BC7_SRGB", 4, 4, 16, CodecKind.Bc, true, true)
-            {
-                AliasOf = Xt1Format.Bc7Srgb,
-            },
+            // BC7 as Bayonetta 3 mods store it (0x4D/0x4E). The blocks are standard BC7 and the tool
+            // round-trips them. The 0x51/0x52 ids some tools list for BC7 are a different format and
+            // are intentionally absent, so these are the only BC7 entries.
+            new(Xt1Format.Bc7Unorm, "BC7_UNORM", 4, 4, 16, CodecKind.Bc, false, true),
+            new(Xt1Format.Bc7Srgb, "BC7_SRGB", 4, 4, 16, CodecKind.Bc, true, true),
             new(Xt1Format.Unknown6d, "UNKNOWN_0x6D (32bpp)", 1, 1, 4, CodecKind.Raw, false, false),
         };
 

@@ -73,16 +73,16 @@ public class FormatTests
     }
 
     /// <summary>
-    /// Community mods use 0x4D/0x4E for BC7. They must decode (and re-encode) exactly like the
-    /// canonical 0x51/0x52, and must not clutter the format pickers.
+    /// BC7 is stored under 0x4D/0x4E, the ids Bayonetta 3 mods use. Round-trip testing confirms these
+    /// are standard BC7 blocks, so they decode and re-encode as BC7.
     /// </summary>
     [Theory]
     [InlineData(0x4Du, false)]
     [InlineData(0x4Eu, true)]
-    public void Bc7AliasIds_DecodeAsBc7(uint value, bool srgb)
+    public void Bc7Ids_DecodeAndEncodeAsBc7(uint value, bool srgb)
     {
         Assert.True(FormatTable.TryGet(value, out var info));
-        Assert.True(info.IsAlias);
+        Assert.False(info.IsAlias);
         Assert.Equal(CodecKind.Bc, info.Codec);
         Assert.Equal(srgb, info.IsSrgb);
         Assert.Equal(16, info.BytesPerBlock);
@@ -131,49 +131,49 @@ public class FormatTests
     }
 
     [Fact]
-    public void Bc7Aliases_AreSelectableTargetFormats()
+    public void Bc7_IsTheOnlyBc7TargetFormat()
     {
-        var all = FormatTable.All.ToList();
-        Assert.Contains(all, f => f.Format == Xt1Format.Bc7UnormAlt);
-        Assert.Contains(all, f => f.Format == Xt1Format.Bc7SrgbAlt);
+        var bc7 = FormatTable.All.Where(f => f.Name.StartsWith("BC7", StringComparison.Ordinal)).ToList();
+        Assert.Equal(2, bc7.Count);
+        Assert.Contains(bc7, f => f.Format == Xt1Format.Bc7Unorm);
+        Assert.Contains(bc7, f => f.Format == Xt1Format.Bc7Srgb);
+        Assert.Equal("BC7_UNORM (0x4D)", FormatTable.Get(Xt1Format.Bc7Unorm)!.DisplayName);
+        Assert.Equal("BC7_SRGB (0x4E)", FormatTable.Get(Xt1Format.Bc7Srgb)!.DisplayName);
+    }
 
-        // Names match the canonical entries; the id in DisplayName is what tells them apart.
-        var unorm = FormatTable.Get(Xt1Format.Bc7UnormAlt)!;
-        var srgb = FormatTable.Get(Xt1Format.Bc7SrgbAlt)!;
-        Assert.Equal("BC7_UNORM", unorm.Name);
-        Assert.Equal("BC7_SRGB", srgb.Name);
-        Assert.Equal("BC7_UNORM (0x4D, community)", unorm.DisplayName);
-        Assert.Equal("BC7_SRGB (0x4E, community)", srgb.DisplayName);
-        Assert.Equal("BC7_UNORM (0x51)", FormatTable.Get(Xt1Format.Bc7Unorm)!.DisplayName);
-        Assert.Equal("BC7_SRGB (0x52)", FormatTable.Get(Xt1Format.Bc7Srgb)!.DisplayName);
+    /// <summary>
+    /// 0x51/0x52 were listed as BC7 by other tools but testing shows they are a different format, so
+    /// the tool must not silently treat them as BC7 or offer them as encode targets.
+    /// </summary>
+    [Fact]
+    public void Bc7LegacyIds_AreNotMapped()
+    {
+        Assert.Null(FormatTable.Get(0x51u));
+        Assert.Null(FormatTable.Get(0x52u));
     }
 
     [Fact]
-    public void Bc7Alias_DecodesTheSameBlocksAsTheCanonicalId()
+    public void Bc7_RoundTripsThroughItsRealId()
     {
-        var canonical = FormatTable.Get(Xt1Format.Bc7Unorm)!;
-        var alias = FormatTable.Get(Xt1Format.Bc7UnormAlt)!;
+        var format = FormatTable.Get(Xt1Format.Bc7Unorm)!;
 
         var image = new RgbaImage(32, 32);
         for (int y = 0; y < 32; y++)
             for (int x = 0; x < 32; x++)
                 image.SetPixel(x, y, (byte)(x * 8), (byte)(y * 8), (byte)((x + y) * 4), 255);
 
-        var encoded = new ManagedEncoder().Encode(image, canonical, srgb: false, EncodeQuality.Normal);
+        var encoded = new ManagedEncoder().Encode(image, format, srgb: false, EncodeQuality.Normal);
         Assert.True(encoded.Success, encoded.Error);
 
-        var fromCanonical = TextureCodec.DecodeLinear(encoded.Data, 32, 32, canonical, out _);
-        var fromAlias = TextureCodec.DecodeLinear(encoded.Data, 32, 32, alias, out _);
-        Assert.NotNull(fromCanonical);
-        Assert.NotNull(fromAlias);
-        Assert.Equal(fromCanonical!.Pixels, fromAlias!.Pixels);
+        var decoded = TextureCodec.DecodeLinear(encoded.Data, 32, 32, format, out _);
+        Assert.NotNull(decoded);
     }
 
     [Fact]
-    public void Bc7Aliases_ExportToDds()
+    public void Bc7_ExportsToDds()
     {
-        Assert.True(DdsIo.CanExport(FormatTable.Get(Xt1Format.Bc7UnormAlt)!));
-        Assert.True(DdsIo.CanExport(FormatTable.Get(Xt1Format.Bc7SrgbAlt)!));
+        Assert.True(DdsIo.CanExport(FormatTable.Get(Xt1Format.Bc7Unorm)!));
+        Assert.True(DdsIo.CanExport(FormatTable.Get(Xt1Format.Bc7Srgb)!));
     }
 
     [Theory]

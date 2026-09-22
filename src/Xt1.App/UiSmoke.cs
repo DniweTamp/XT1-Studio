@@ -280,8 +280,8 @@ internal static class UiSmoke
                 import.Show();
                 Pump(log, ref watch, "import dialog shown", 30);
                 var targets = import.UiTestFormatItems();
-                Expect(log, targets.Contains("BC7_UNORM (0x4D, community)"),
-                    "the import dialog offers the community BC7 id as a target", string.Join(", ", targets.Where(t => t.StartsWith("BC7"))));
+                Expect(log, targets.Contains("BC7_UNORM (0x4D)"),
+                    "the import dialog offers the real BC7 id as a target", string.Join(", ", targets.Where(t => t.StartsWith("BC7"))));
                 var optionLabels = import.UiTestOptionLabels();
                 Expect(log, optionLabels.Any(o => o.StartsWith("Solidify")), "the import dialog offers solidify",
                     string.Join(" | ", optionLabels));
