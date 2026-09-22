@@ -43,5 +43,6 @@ public sealed class NvttEncoder : ITextureEncoder, IDisposable
         _ => NvttQuality.Normal,
     };
 
+    /// <summary>Disposes the native library this encoder was built on: the encoder owns that handle.</summary>
     public void Dispose() => _native.Dispose();
 }

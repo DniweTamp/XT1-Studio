@@ -28,8 +28,22 @@ public sealed record RecompressOptions(
     bool Downscale,
     bool SkipDownscaleWithoutMips,
     EncoderBackend Backend,
-    EncodeQuality Quality,
-    bool SyncFlags);
+    EncodeQuality OpaqueQuality,
+    EncodeQuality AlphaQuality,
+    bool SyncFlags)
+{
+    public static bool UsesSeparateAlphaQuality(RecompressFormatRule rule) =>
+        rule is RecompressFormatRule.Bc1OrBc3 or RecompressFormatRule.Bc1OrBc7;
+
+    /// <summary>
+    /// Mixed rules can tune their opaque BC1 and alpha BC3/BC7 encodes independently. Fixed-format
+    /// rules use the primary (opaque) selector for every texture, regardless of its source alpha.
+    /// </summary>
+    public EncodeQuality QualityFor(bool hasAlpha) =>
+        hasAlpha && UsesSeparateAlphaQuality(Rule)
+            ? AlphaQuality
+            : OpaqueQuality;
+}
 
 public sealed record RecompressStats(int Files, int Converted, int Skipped);
 
@@ -139,7 +153,8 @@ public sealed class BatchRecompressor
             levels.Add(image);
         }
 
-        var target = ChooseFormat(texture, options.Rule, levels[0]);
+        bool hasAlpha = levels[0].HasTransparency();
+        var target = ChooseFormat(texture, options.Rule, hasAlpha);
         var encoder = _encoders.Pick(options.Backend, target);
 
         var working = levels;
@@ -166,7 +181,8 @@ public sealed class BatchRecompressor
         uint originalH = texture.Header.Height;
         texture.Header.Format = target.Format;
 
-        var result = TextureEncoder.EncodeLevels(texture, working, encoder, options.Quality);
+        var quality = options.QualityFor(hasAlpha);
+        var result = TextureEncoder.EncodeLevels(texture, working, encoder, quality);
         if (!result.Success)
         {
             texture.Header.Format = originalFormat;
@@ -182,14 +198,13 @@ public sealed class BatchRecompressor
 
         if (options.SyncFlags) TextureOperations.SyncFlagsFromFormat(texture);
 
-        log.Report($"    #{texture.Index} {source.Name} -> {target.Name}, {mips} mip(s)");
+        log.Report($"    #{texture.Index} {source.Name} -> {target.Name}, {quality} quality, {mips} mip(s)");
         return true;
     }
 
-    private static FormatInfo ChooseFormat(EditableTexture texture, RecompressFormatRule rule, RgbaImage baseImage)
+    private static FormatInfo ChooseFormat(EditableTexture texture, RecompressFormatRule rule, bool alpha)
     {
         bool srgb = texture.FormatInfo?.IsSrgb ?? false;
-        bool alpha = baseImage.HasTransparency();
         bool bc7 = rule switch
         {
             RecompressFormatRule.AlwaysBc7 => true,

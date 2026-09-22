@@ -8,7 +8,7 @@ using Xt1.Core.Xt1;
 namespace Xt1.App;
 
 /// <summary>
-/// <c>Xt1.App.exe --gltest &lt;file&gt; [options]</c>: assemble a 3D texture in the real OpenGL
+/// <c>XT1 Studio.exe --gltest &lt;file&gt; [options]</c>: assemble a 3D texture in the real OpenGL
 /// viewport, render it offscreen and check the result numerically, so the 3D view can be verified
 /// without a human at the keyboard. It also writes the frames as PNGs for visual inspection.
 ///

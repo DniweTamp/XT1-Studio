@@ -67,7 +67,8 @@ public sealed class EditableTexture
         uint payloadOffset,
         uint payloadSize,
         byte[] payload,
-        string? name = null)
+        string? name = null,
+        bool trackOriginal = true)
     {
         Header = header;
         Table2Bytes = (byte[])table2Bytes.Clone();
@@ -79,7 +80,7 @@ public sealed class EditableTexture
         OriginalPayloadOffset = payloadOffset;
         OriginalPayloadSize = payloadSize;
         Payload = payload;
-        OriginalPayload = (byte[])payload.Clone();
+        OriginalPayload = trackOriginal ? (byte[])payload.Clone() : payload;
         Name = name;
     }
 
@@ -254,6 +255,11 @@ public sealed class EditableTexture
     /// </summary>
     public static EditableTexture FromRaw(RawXt1 raw) =>
         new(raw.Header, new byte[4], 0, 0, (uint)Math.Min(raw.Payload.Length, uint.MaxValue), raw.Payload);
+
+    /// <summary>Create a non-editable wrapper without cloning the payload for dirty tracking.</summary>
+    public static EditableTexture FromRawReadOnly(RawXt1 raw) =>
+        new(raw.Header, new byte[4], 0, 0, (uint)Math.Min(raw.Payload.Length, uint.MaxValue), raw.Payload,
+            trackOriginal: false);
 
     public EditableTexture Clone()
     {

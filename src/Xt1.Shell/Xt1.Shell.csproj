@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>Xt1.Shell</AssemblyName>
+    <RootNamespace>Xt1.Shell</RootNamespace>
+    <!--
+      Explorer only thumbnails a file type through an in-process COM server, and it will not load a
+      managed assembly directly. EnableComHosting builds Xt1.Shell.comhost.dll beside the managed
+      assembly: a native DLL that exports DllGetClassObject and bootstraps the .NET runtime in the
+      host process. BuiltInComInteropSupport is what lets a managed class be exposed through a CCW.
+    -->
+    <EnableComHosting>true</EnableComHosting>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <!--
+      The COM host is a native DLL, so the architecture has to be pinned rather than inherited from
+      whatever machine builds it: it must match Explorer (x64 on every supported Windows), and the
+      app publishes win-x64. Framework-dependent, like the app: the .NET 8 runtime is required.
+    -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Xt1.Core\Xt1.Core.csproj" />
+  </ItemGroup>
+
+</Project>

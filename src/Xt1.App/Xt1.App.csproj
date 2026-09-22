@@ -8,12 +8,14 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <AssemblyName>Xt1.App</AssemblyName>
+    <AssemblyName>XT1 Studio</AssemblyName>
     <RootNamespace>Xt1.App</RootNamespace>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <!-- Executable/taskbar icon; also embedded as a resource so forms can load it at runtime. -->
     <ApplicationIcon>Xt1Studio.ico</ApplicationIcon>
+    <!-- Where Xt1.Shell puts its win-x64 COM host; copied beside the app as a `shell` folder. -->
+    <ShellHostOutputDir>$(MSBuildThisFileDirectory)..\Xt1.Shell\bin\$(Configuration)\net8.0-windows\win-x64\</ShellHostOutputDir>
   </PropertyGroup>
 
   <ItemGroup>
@@ -26,6 +28,34 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Xt1.Core\Xt1.Core.csproj" />
+    <!-- The shell thumbnail handler: referenced for its registration API and the self-check; the
+         COM host itself is copied out as a folder (it cannot live inside the single-file exe). -->
+    <ProjectReference Include="..\Xt1.Shell\Xt1.Shell.csproj" />
   </ItemGroup>
+
+  <!--
+    The COM host has to be a real file on disk next to its managed assembly, so the shell project's
+    output becomes a `shell` folder beside the app in both the build and the publish layout. That
+    keeps a dev build and the published exe registering the same thing.
+  -->
+  <Target Name="CopyShellHostToBuildOutput" AfterTargets="Build"
+          Condition="Exists('$(ShellHostOutputDir)Xt1.Shell.comhost.dll')">
+    <ItemGroup>
+      <ShellHostBuildFile Include="$(ShellHostOutputDir)**\*" Exclude="$(ShellHostOutputDir)**\*.pdb" />
+    </ItemGroup>
+    <!-- A thumbnail request leaves the handler loaded in a dllhost.exe surrogate for a while; that
+         must not fail a build (the folder then keeps the previous, still valid copy). -->
+    <Copy SourceFiles="@(ShellHostBuildFile)" DestinationFolder="$(OutDir)shell\%(RecursiveDir)"
+          SkipUnchangedFiles="true" ContinueOnError="WarnAndContinue" />
+  </Target>
+
+  <Target Name="CopyShellHostToPublishOutput" AfterTargets="Publish"
+          Condition="Exists('$(ShellHostOutputDir)Xt1.Shell.comhost.dll')">
+    <ItemGroup>
+      <ShellHostPublishFile Include="$(ShellHostOutputDir)**\*" Exclude="$(ShellHostOutputDir)**\*.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ShellHostPublishFile)" DestinationFolder="$(PublishDir)shell\%(RecursiveDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

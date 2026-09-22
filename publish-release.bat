@@ -86,7 +86,7 @@ if errorlevel 1 (
     goto :fail
 )
 
-set "EXE=%OUTPUT%\Xt1.App.exe"
+set "EXE=%OUTPUT%\XT1 Studio.exe"
 if not exist "%EXE%" (
     echo.
     echo [error] Publish reported success but "%EXE%" is missing.

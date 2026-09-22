@@ -181,6 +181,30 @@ public class LayoutTests
     }
 
     [Fact]
+    public void WidePitch_DoesNotFireWithoutTheLayoutFlag_AfterAstcToBc3Conversion()
+    {
+        // ui_title_us.dat/title.wta #1 is ASTC 12x12 1032x516 with layout 0x3. In ASTC its
+        // 43-block height is small, which used to hide the faulty low-bits-only wide-pitch trigger.
+        // BC3 has 258x129 blocks and is no longer small, but 0x3 is still an ordinary layout: Tegra
+        // readers expect the natural 65-GOB pitch, not a 0x403-style 80-GOB pitch.
+        var result = Compute(0x48, 1032, 516, 1, 1, TextureType.T2D, 0x3);
+
+        Assert.False(result.WidePitchApplied);
+        Assert.Equal(4160, result.Mips[0].Pitch);
+        Assert.Equal(798720, result.ComputedImageSize);
+    }
+
+    [Fact]
+    public void WidePitch_FiresForTheFlaggedLayoutClass()
+    {
+        var result = Compute(0x48, 1032, 516, 1, 1, TextureType.T2D, 0x403);
+
+        Assert.True(result.WidePitchApplied);
+        Assert.Equal(5120, result.Mips[0].Pitch);
+        Assert.Equal(983040, result.ComputedImageSize);
+    }
+
+    [Fact]
     public void WidePitch_DoesNotFireWhenTheBaseRowIsAlready1024Aligned()
     {
         // ASTC 8x8 1024x1024 with blockHeightLog2 3 has a 128 * 16 = 2048-byte base row, already a

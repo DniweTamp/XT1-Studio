@@ -25,10 +25,24 @@ public sealed class SettingsDialog : Form
     {
         Minimum = 64, Maximum = 2048, Increment = 64, Width = 90, TextAlign = HorizontalAlignment.Left,
     };
+    private readonly Button _shellButton = new() { AutoSize = true, Margin = new Padding(0, 2, 0, 2) };
+    private readonly CheckBox _shellMachine = new()
+    {
+        Text = "For all users on this machine (needs an administrator)",
+        AutoSize = true,
+    };
+    private Label _shellStatus = null!;
 
     public AppSettings Result { get; }
 
     private TableLayoutPanel _grid = null!;
+
+    /// <summary>
+    /// Test hook: the Explorer thumbnail row - the button's label, the status line and whether the
+    /// button can act (the shell host has to be deployed beside the app for it to do anything).
+    /// </summary>
+    internal (string Button, string Status, bool Enabled) UiTestShellRow() =>
+        (_shellButton.Text, _shellStatus.Text, _shellButton.Enabled);
 
     /// <summary>
     /// Test hook: per row, the label's right edge / vertical center and the editor's left edge /
@@ -67,7 +81,7 @@ public sealed class SettingsDialog : Form
         MinimizeBox = false;
         MaximizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(680, 520);
+        ClientSize = new Size(680, 580);
 
         _backend.Items.AddRange(new object[] { EncoderBackend.Nvtt, EncoderBackend.Managed, EncoderBackend.Cli });
         _backend.SelectedItem = settings.PreferredBackend;
@@ -120,6 +134,12 @@ public sealed class SettingsDialog : Form
         AddHint(grid, ref row, "Leave blank to auto-detect, or point at a custom install.");
         // The settings file lives next to the executable; no need to spend a section on it.
 
+        AddSection(grid, ref row, "Explorer");
+        AddRow(grid, ref row, "Thumbnails for .xt1", _shellButton, null);
+        AddRow(grid, ref row, string.Empty, _shellMachine, null, span: 2);
+        _shellStatus = MakeHint(string.Empty);
+        AddControl(grid, ref row, _shellStatus);
+
         var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, AutoSize = true };
         var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, AutoSize = true };
         ok.Click += (_, _) => Commit(formats);
@@ -137,6 +157,40 @@ public sealed class SettingsDialog : Form
         Controls.Add(buttons);
         AcceptButton = ok;
         CancelButton = cancel;
+
+        RefreshShell();
+        _shellMachine.CheckedChanged += (_, _) => RefreshShell();
+        _shellButton.Click += (_, _) => ToggleShell();
+
+        // The button acts on the checked scope and immediately (it is a registration, not a setting
+        // that waits for OK), so its label and the status line always describe the current state.
+        void RefreshShell()
+        {
+            bool machine = _shellMachine.Checked;
+            bool registered = ShellIntegration.IsRegistered(machine);
+            var comHost = ShellIntegration.ComHost();
+            _shellButton.Text = registered ? "Remove" : "Register";
+            _shellButton.Enabled = registered || comHost is not null;
+            _shellStatus.Text = ShellIntegration.Describe(machine, registered, comHost);
+        }
+
+        void ToggleShell()
+        {
+            bool machine = _shellMachine.Checked;
+            try
+            {
+                if (ShellIntegration.IsRegistered(machine))
+                    ShellIntegration.Disable(machine);
+                else
+                    ShellIntegration.Enable(machine);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, ex.Message, "Explorer thumbnails", MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
+            RefreshShell();
+        }
 
         void Commit(List<FormatInfo> formatList)
         {
@@ -185,18 +239,27 @@ public sealed class SettingsDialog : Form
         row++;
     }
 
-    private static void AddHint(TableLayoutPanel grid, ref int row, string text)
+    private static void AddHint(TableLayoutPanel grid, ref int row, string text) =>
+        AddControl(grid, ref row, MakeHint(text));
+
+    /// <summary>
+    /// A full-width grey line. MaximumSize caps the width so a long status wraps instead of being
+    /// clipped at the dialog edge.
+    /// </summary>
+    private static Label MakeHint(string text) => new()
     {
-        var label = new Label
-        {
-            Text = text,
-            AutoSize = true,
-            ForeColor = Color.FromArgb(112, 112, 124),
-            Margin = new Padding(0, 1, 0, 4),
-        };
+        Text = text,
+        AutoSize = true,
+        ForeColor = Color.FromArgb(112, 112, 124),
+        Margin = new Padding(0, 1, 0, 4),
+        MaximumSize = new Size(636, 0),
+    };
+
+    private static void AddControl(TableLayoutPanel grid, ref int row, Control control)
+    {
         grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        grid.Controls.Add(label, 0, row);
-        grid.SetColumnSpan(label, 3);
+        grid.Controls.Add(control, 0, row);
+        grid.SetColumnSpan(control, 3);
         row++;
     }
 

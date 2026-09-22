@@ -13,7 +13,7 @@ using Xt1.App.Services;
 namespace Xt1.App;
 
 /// <summary>
-/// Headless diagnostic used by <c>Xt1.App.exe --selfcheck</c>. Exercises the same services the
+/// Headless diagnostic used by <c>XT1 Studio.exe --selfcheck</c>. Exercises the same services the
 /// UI uses (settings, native tools, bank loading, codecs, encoders, writers) without a window,
 /// so the app assembly can be verified on a machine without a usable display.
 /// </summary>
@@ -132,6 +132,108 @@ internal static class SelfCheck
                     var image = TextureCodec.Decode(texture, 0, 0, 0, out var error);
                     if (image is null) throw new InvalidOperationException(error);
                     return $"{image.Width}x{image.Height} {texture.FormatInfo!.Name}";
+                });
+
+                // A real texture exported as a loose .xt1 in its own temp folder, for the two checks
+                // below. The caller removes the folder when it is done with the file.
+                (string Source, EditableTexture Texture) WriteSampleXt1()
+                {
+                    var document = BankDocument.Load(golden!);
+                    var texture = document.AllTextures.First(t => TextureCodec.CanDecode(t.FormatInfo));
+                    var directory = Path.Combine(Path.GetTempPath(), "Xt1Studio", "selfcheck",
+                        Guid.NewGuid().ToString("N"));
+                    Directory.CreateDirectory(directory);
+                    var source = Path.Combine(directory, "sample.xt1");
+                    File.WriteAllBytes(source, new RawXt1(texture.Header.Clone(), texture.Payload).ToBytes());
+                    return (source, texture);
+                }
+
+                static void DeleteSample(string source)
+                {
+                    try { Directory.Delete(Path.GetDirectoryName(source)!, recursive: true); } catch { }
+                }
+
+                /// <summary>The size a thumbnail should come out at: the request, or the level under it.</summary>
+                static int ExpectedSize(EditableTexture texture, int requested)
+                {
+                    var mip = texture.Layout.Mips[Thumbnailer.PickMip(texture, requested)];
+                    return Math.Min(requested, Math.Max(mip.Width, mip.Height));
+                }
+
+                // The whole --thumbnail path on a real texture: export it as a loose .xt1, run the
+                // command line over it, and check the image that comes back is the expected size.
+                Check("thumbnail a loose .xt1", () =>
+                {
+                    var (source, texture) = WriteSampleXt1();
+                    try
+                    {
+                        var target = Path.Combine(Path.GetDirectoryName(source)!, "thumb.png");
+                        var rest = new[] { source, target, "--size", "256" };
+                        int exit = ThumbnailCli.Run(source, target, rest, line => log("       " + line));
+                        if (exit != 0) throw new InvalidOperationException($"--thumbnail exited {exit}");
+                        if (!File.Exists(target)) throw new InvalidOperationException("no image was written");
+
+                        var mips = texture.Layout.Mips;
+                        int mip = Thumbnailer.PickMip(texture, 256);
+                        var thumb = ImageIo.Load(target);
+                        if (Math.Max(thumb.Width, thumb.Height) != ExpectedSize(texture, 256))
+                            throw new InvalidOperationException(
+                                $"thumbnail is {thumb.Width}x{thumb.Height}, " +
+                                $"expected {ExpectedSize(texture, 256)}");
+                        if (mips.Count > 1 && Math.Max(mips[0].Width, mips[0].Height) > 256 && mip == 0)
+                            throw new InvalidOperationException("a level under the base was available but not used");
+                        return $"mip {mip} of {mips.Count} -> {thumb.Width}x{thumb.Height}";
+                    }
+                    finally
+                    {
+                        DeleteSample(source);
+                    }
+                });
+
+                // The shell handler itself, called the way Explorer calls it (minus the COM hop):
+                // initialize from the file, ask for a 256px thumbnail, and check the DIB that comes
+                // back. The COM host also has to be deployed beside the app for any of this to work.
+                Check("shell thumbnail handler", () =>
+                {
+                    var comHost = Xt1.Shell.ShellRegistration.FindComHost();
+                    if (comHost is null)
+                        throw new InvalidOperationException(
+                            "Xt1.Shell.comhost.dll is not beside the app (expected in a `shell` folder)");
+
+                    var (source, texture) = WriteSampleXt1();
+                    try
+                    {
+                        var provider = new Xt1.Shell.Xt1ThumbnailProvider();
+                        int initialized = provider.Initialize(source, 0);
+                        if (initialized != 0)
+                            throw new InvalidOperationException($"Initialize failed (0x{initialized:X8})");
+
+                        int hr = ((Xt1.Shell.IThumbnailProvider)provider)
+                            .GetThumbnail(256, out var bitmap, out var alpha);
+                        if (hr != 0) throw new InvalidOperationException($"GetThumbnail failed (0x{hr:X8})");
+
+                        try
+                        {
+                            if (!Xt1.Shell.DibBitmap.Describe(bitmap, out int width, out int height, out int bpp))
+                                throw new InvalidOperationException("the handler did not return a DIB");
+
+                            int expected = ExpectedSize(texture, 256);
+                            if (Math.Max(width, height) != expected)
+                                throw new InvalidOperationException(
+                                    $"{width}x{height} bitmap, expected {expected} on the long side");
+                            if (bpp != 32)
+                                throw new InvalidOperationException($"bitmap is {bpp}bpp, expected 32");
+                            return $"{width}x{height} {bpp}bpp, alpha type {alpha}, host {Path.GetFileName(comHost)}";
+                        }
+                        finally
+                        {
+                            Xt1.Shell.DibBitmap.Delete(bitmap);
+                        }
+                    }
+                    finally
+                    {
+                        DeleteSample(source);
+                    }
                 });
 
                 Check("re-encode texture", () =>

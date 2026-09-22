@@ -21,6 +21,10 @@ public sealed class BatchRecompressDialog : Form
     private readonly CheckBox _keepNoMips = new() { Text = "Do not downscale images without mipmaps", AutoSize = true, Checked = true };
     private readonly CheckBox _syncFlags = new() { Text = "Sync WTB sRGB / cubemap flags from the new format", AutoSize = true, Checked = true };
     private readonly ComboBox _backend = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
+    private readonly Label _opaqueQualityLabel = new() { Text = "Quality", AutoSize = true, Margin = new Padding(3, 8, 3, 3) };
+    private readonly ComboBox _opaqueQuality = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
+    private readonly Label _alphaQualityLabel = new() { Text = "Alpha quality", AutoSize = true, Margin = new Padding(3, 8, 3, 3) };
+    private readonly ComboBox _alphaQuality = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
     private readonly TextBox _log = new()
     {
         Multiline = true,
@@ -32,6 +36,24 @@ public sealed class BatchRecompressDialog : Form
     private readonly Button _run = new() { Text = "Run", AutoSize = true };
     private readonly ProgressBar _progress = new() { Dock = DockStyle.Fill };
     private CancellationTokenSource? _cancellation;
+
+    /// <summary>Test hook for verifying the conditional quality controls without running a batch.</summary>
+    internal (string OpaqueLabel, bool AlphaVisible, IReadOnlyList<string> Qualities) UiTestQualityState() =>
+        (_opaqueQualityLabel.Text, _alphaQuality.Visible && _alphaQualityLabel.Visible,
+            _opaqueQuality.Items.Cast<object>().Select(item => item.ToString() ?? string.Empty).ToList());
+
+    /// <summary>Test hook for switching format rules through the same selection event as the UI.</summary>
+    internal void UiTestSelectRule(RecompressFormatRule rule)
+    {
+        for (int i = 0; i < _rule.Items.Count; i++)
+        {
+            if (_rule.Items[i] is RuleOption option && option.Rule == rule)
+            {
+                _rule.SelectedIndex = i;
+                return;
+            }
+        }
+    }
 
     public BatchRecompressDialog(
         Func<RecompressRequest, IProgress<string>, CancellationToken, Task> runner,
@@ -53,10 +75,22 @@ public sealed class BatchRecompressDialog : Form
             new RuleOption(RecompressFormatRule.AlwaysBc7, "Always BC7"),
         });
         _rule.SelectedIndex = 1;
+        _rule.SelectedIndexChanged += (_, _) => UpdateQualityControls();
 
         _backend.Items.AddRange(new object[] { EncoderBackend.Nvtt, EncoderBackend.Managed, EncoderBackend.Cli });
         // Honor the caller's backend (including Cli) instead of coercing it; fall back only if unset.
         _backend.SelectedItem = backend;
+        var qualities = new object[]
+        {
+            EncodeQuality.Fastest,
+            EncodeQuality.Normal,
+            EncodeQuality.Production,
+            EncodeQuality.Highest,
+        };
+        _opaqueQuality.Items.AddRange(qualities);
+        _alphaQuality.Items.AddRange(qualities);
+        _opaqueQuality.SelectedItem = EncodeQuality.Normal;
+        _alphaQuality.SelectedItem = EncodeQuality.Normal;
 
         _current.Enabled = hasDocument;
         _current.Checked = hasDocument;
@@ -97,7 +131,10 @@ public sealed class BatchRecompressDialog : Form
         Add(top, ref row, string.Empty, _keepNoMips, null);
         Add(top, ref row, string.Empty, _syncFlags, null);
         Add(top, ref row, "Encoder backend", _backend, null);
+        Add(top, ref row, _opaqueQualityLabel, _opaqueQuality, null);
+        Add(top, ref row, _alphaQualityLabel, _alphaQuality, null);
         AddHint(top, ref row, "Folder mode rewrites the originals in place; there is no backup.");
+        UpdateQualityControls();
 
         var bottom = new TableLayoutPanel
         {
@@ -126,10 +163,25 @@ public sealed class BatchRecompressDialog : Form
         _recursive.Enabled = folder;
     }
 
+    private void UpdateQualityControls()
+    {
+        var rule = (_rule.SelectedItem as RuleOption)?.Rule ?? RecompressFormatRule.Bc1OrBc3;
+        bool mixed = RecompressOptions.UsesSeparateAlphaQuality(rule);
+        _opaqueQualityLabel.Text = mixed ? "Opaque quality" : "Quality";
+        _alphaQualityLabel.Visible = mixed;
+        _alphaQuality.Visible = mixed;
+    }
+
     private static void Add(TableLayoutPanel table, ref int row, string label, Control control, Control? extra)
     {
+        Add(table, ref row,
+            new Label { Text = label, AutoSize = true, Margin = new Padding(3, 8, 3, 3) }, control, extra);
+    }
+
+    private static void Add(TableLayoutPanel table, ref int row, Control label, Control control, Control? extra)
+    {
         table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        table.Controls.Add(new Label { Text = label, AutoSize = true, Margin = new Padding(3, 8, 3, 3) }, 0, row);
+        table.Controls.Add(label, 0, row);
         table.Controls.Add(control, 1, row);
         if (extra is not null) table.Controls.Add(extra, 2, row);
         row++;
@@ -161,7 +213,8 @@ public sealed class BatchRecompressDialog : Form
             _downscale.Checked,
             _keepNoMips.Checked,
             (EncoderBackend)(_backend.SelectedItem ?? EncoderBackend.Nvtt),
-            EncodeQuality.Normal,
+            (EncodeQuality)(_opaqueQuality.SelectedItem ?? EncodeQuality.Normal),
+            (EncodeQuality)(_alphaQuality.SelectedItem ?? EncodeQuality.Normal),
             _syncFlags.Checked);
 
         IReadOnlyList<string> files;

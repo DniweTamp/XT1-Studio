@@ -26,6 +26,21 @@ internal static class Program
             return DecodeExport.Run(exportFile, exportOut, rest, line => Console.WriteLine(line));
         }
 
+        if (args.Any(a => string.Equals(a, "--register-shell", StringComparison.OrdinalIgnoreCase)))
+            return ShellCli.Run(register: true, args, line => Console.WriteLine(line));
+
+        if (args.Any(a => string.Equals(a, "--unregister-shell", StringComparison.OrdinalIgnoreCase)))
+            return ShellCli.Run(register: false, args, line => Console.WriteLine(line));
+
+        var thumbIndex = Array.FindIndex(args, a => string.Equals(a, "--thumbnail", StringComparison.OrdinalIgnoreCase));
+        if (thumbIndex >= 0)
+        {
+            var rest = args[(thumbIndex + 1)..];
+            var thumbFile = rest.Length > 0 && !rest[0].StartsWith('-') ? rest[0] : null;
+            var thumbOut = rest.Length > 1 && !rest[1].StartsWith('-') ? rest[1] : null;
+            return ThumbnailCli.Run(thumbFile, thumbOut, rest, line => Console.WriteLine(line));
+        }
+
         var shotIndex = Array.FindIndex(args, a => string.Equals(a, "--panelshot", StringComparison.OrdinalIgnoreCase));
         if (shotIndex >= 0)
         {
@@ -49,7 +64,7 @@ internal static class Program
             var target = dumpIndex + 1 < args.Length ? args[dumpIndex + 1] : null;
             if (target is null)
             {
-                Console.WriteLine("usage: Xt1.App.exe --dump-tree <file>");
+                Console.WriteLine("usage: \"XT1 Studio.exe\" --dump-tree <file>");
                 return 2;
             }
             return TreeDump.Run(target, line => Console.WriteLine(line));

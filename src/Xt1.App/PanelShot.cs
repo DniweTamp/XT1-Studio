@@ -3,7 +3,7 @@
 namespace Xt1.App;
 
 /// <summary>
-/// <c>Xt1.App.exe --panelshot &lt;file&gt; &lt;out.png&gt; [--index N] [--advanced] [--tree]</c>:
+/// <c>XT1 Studio.exe --panelshot &lt;file&gt; &lt;out.png&gt; [--index N] [--advanced] [--tree]</c>:
 /// render the right-hand inspector (and optionally the tree) to a PNG so the layout can be reviewed
 /// without a human at the keyboard, the same way <c>--export-decode</c> makes decode correctness
 /// reviewable. Also prints the inspector state and the right-click menu for the selection.

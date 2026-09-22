@@ -1922,17 +1922,33 @@ public sealed class MainForm : Form
         using var dialog = new SettingsDialog(_settings);
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
 
+        ApplySettings();
+        SetStatus("Settings saved.");
+    }
+
+    /// <summary>
+    /// The post-dialog half of <see cref="ShowSettings"/>: the native tools are dropped and loaded
+    /// again because the dialog may have pointed them somewhere else.
+    /// </summary>
+    private void ApplySettings()
+    {
         _settings.Save();
-        _nvttEncoder?.Dispose();
-        _nvttNative?.Dispose();
+
+        // NvttEncoder.Dispose() unloads the library it was built on, so the native is released
+        // through its owner: disposing both unloaded the same handle twice and threw (FreeLibrary on
+        // a freed handle gives "Operation is not valid due to the current state of the object").
+        if (_nvttEncoder is not null) _nvttEncoder.Dispose();
+        else _nvttNative?.Dispose();
         _nvttNative = null;
         _nvttEncoder = null;
         _cliEncoder = null;
 
         InitializeNativeTools();
         UpdatePreview();
-        SetStatus("Settings saved.");
     }
+
+    /// <summary>Test hook: the settings-apply path, without opening the dialog.</summary>
+    internal void UiTestApplySettings() => ApplySettings();
 
     private void ShowBatchRecompress()
     {
@@ -2041,6 +2057,9 @@ public sealed class MainForm : Form
 
     /// <summary>Test hook used by <c>--uitest</c>.</summary>
     internal string UiTestStatus => _statusLabel.Text ?? string.Empty;
+
+    /// <summary>Test hook used by <c>--uitest</c>: which native encoders are loaded.</summary>
+    internal string UiTestBackendState => _backendLabel.Text ?? string.Empty;
 
     /// <summary>Test hook used by <c>--uitest</c>: select the first 3D texture in the document.</summary>
     internal string UiTestSelectFirstVolume()

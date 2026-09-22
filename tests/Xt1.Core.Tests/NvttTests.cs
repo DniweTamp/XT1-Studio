@@ -1,4 +1,5 @@
 using Xt1.Core.Codecs;
+using Xt1.Core.Encoding;
 using Xt1.Core.Format;
 using Xt1.Core.Imaging;
 using Xt1.Core.Nvtt;
@@ -117,6 +118,22 @@ public class NvttTests
             Assert.True(MeanAbsoluteError(image.Pixels, decoded.Pixels) < 32,
                 $"footprint {FormatTable.AstcFootprintNames[i]} round-trip error too high");
         }
+    }
+
+    [Fact]
+    public void Nvtt_DisposeIsIdempotent_AndSafeThroughItsEncoder()
+    {
+        var nvtt = NvttNative.TryCreate(out _);
+        if (nvtt is null) return; // optional dependency
+
+        // Exactly what saving settings used to do: the encoder owns the library handle it was built
+        // on, so it frees it, and the direct Dispose has to be a no-op. Freeing an already freed
+        // handle otherwise throws "Operation is not valid due to the current state of the object"
+        // out of NativeLibrary.Free.
+        var encoder = new NvttEncoder(nvtt);
+        encoder.Dispose();
+        nvtt.Dispose();
+        nvtt.Dispose();
     }
 
     private static double MeanAbsoluteError(byte[] a, byte[] b)

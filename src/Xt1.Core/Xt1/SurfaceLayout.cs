@@ -167,11 +167,11 @@ public static class SurfaceLayout
             ? blockDepthLog2 > 0 ? 1 << blockDepthLog2 : GobSwizzle.BlockDepth(baseDepth)
             : 1;
 
-        // Whether the driver used tile_width_spacing = 4 is a record-level property (a texture cannot
-        // vary it per mip), so decide it once from the base mip: blockHeightLog2 == 3 and a base row
-        // that is not already 1024-aligned. Validated at 100% over the full census with zero false
-        // positives/negatives; the format guard is redundant on the corpus, so the trigger is exact.
-        bool widePitch = blkLog2 == 3
+        // Bit 0x400 identifies the tile_width_spacing = 4 layout class. The low bits alone are not
+        // enough: ordinary layout 0x3 textures can become non-small when recompressed from ASTC to
+        // BC, and treating those as wide produces a payload external Tegra readers deswizzle with
+        // the wrong pitch. Every widened record in the ROM census is 0x403; no 0x3 record is wide.
+        bool widePitch = (layout & 0x400) != 0 && blkLog2 == 3
             && (Mem.DivUp((int)Math.Max(1u, width), fmt.BlockWidth) * fmt.BytesPerBlock) % 1024 != 0;
 
         var mipList = BuildMips(null, out long cursor, out long faceSize, out bool anyWide);

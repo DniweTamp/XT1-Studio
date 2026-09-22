@@ -19,7 +19,33 @@ public class BatchRecompressTests
 
     private static RecompressOptions Options(RecompressFormatRule rule = RecompressFormatRule.Bc1OrBc3,
         bool downscale = false, bool skipNoMips = true) =>
-        new(rule, downscale, skipNoMips, EncoderBackend.Managed, EncodeQuality.Fastest, SyncFlags: true);
+        new(rule, downscale, skipNoMips, EncoderBackend.Managed, EncodeQuality.Fastest,
+            EncodeQuality.Fastest, SyncFlags: true);
+
+    [Theory]
+    [InlineData(RecompressFormatRule.Bc1OrBc3, false, EncodeQuality.Fastest)]
+    [InlineData(RecompressFormatRule.Bc1OrBc3, true, EncodeQuality.Highest)]
+    [InlineData(RecompressFormatRule.Bc1OrBc7, false, EncodeQuality.Fastest)]
+    [InlineData(RecompressFormatRule.Bc1OrBc7, true, EncodeQuality.Highest)]
+    [InlineData(RecompressFormatRule.AlwaysBc1, true, EncodeQuality.Fastest)]
+    [InlineData(RecompressFormatRule.AlwaysBc7, true, EncodeQuality.Fastest)]
+    public void QualityFor_SeparatesMixedOpaqueAndAlphaModes(
+        RecompressFormatRule rule, bool hasAlpha, EncodeQuality expected)
+    {
+        var options = new RecompressOptions(rule, false, true, EncoderBackend.Nvtt,
+            EncodeQuality.Fastest, EncodeQuality.Highest, true);
+
+        Assert.Equal(expected, options.QualityFor(hasAlpha));
+    }
+
+    [Theory]
+    [InlineData(RecompressFormatRule.Bc1OrBc3, true)]
+    [InlineData(RecompressFormatRule.Bc1OrBc7, true)]
+    [InlineData(RecompressFormatRule.AlwaysBc1, false)]
+    [InlineData(RecompressFormatRule.AlwaysBc7, false)]
+    public void UsesSeparateAlphaQuality_IsTheCanonicalRuleClassification(
+        RecompressFormatRule rule, bool expected) =>
+        Assert.Equal(expected, RecompressOptions.UsesSeparateAlphaQuality(rule));
 
     private static string NewTempDirectory()
     {
@@ -74,6 +100,27 @@ public class BatchRecompressTests
         {
             TryDelete(directory);
         }
+    }
+
+    [Fact]
+    public void RecompressTitleTextureToBc3_KeepsOrdinaryGobPitch()
+    {
+        var path = Path.Combine(TestPaths.Romfs, "ui", "ui_title_us.dat");
+        if (!File.Exists(path)) return;
+
+        var document = BankDocument.Load(path);
+        var texture = document.Sections[0].Bank.Textures[1];
+        Assert.Equal(Xt1Format.Astc12x12Unorm, texture.Header.Format);
+        Assert.Equal(0x3u, texture.Header.Layout);
+
+        var recompressor = new BatchRecompressor(ManagedOnly());
+        Assert.True(recompressor.Convert(texture, Options(), new SyncProgress()));
+
+        Assert.Equal(Xt1Format.Bc3Unorm, texture.Header.Format);
+        Assert.False(texture.Layout.WidePitchApplied);
+        Assert.Equal(4160, texture.Layout.Mips[0].Pitch);
+        Assert.Equal(798720UL, texture.Header.ImageSize);
+        Assert.True(texture.Layout.SizeMatches, texture.Layout.Note);
     }
 
     /// <summary>Downscaling drops mip 0: the saved texture is half the size with one fewer mip.</summary>

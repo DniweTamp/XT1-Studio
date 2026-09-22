@@ -7,7 +7,7 @@ using Xt1.Core.Settings;
 namespace Xt1.App;
 
 /// <summary>
-/// <c>Xt1.App.exe --uitest [file]</c>: builds the real UI control tree off-screen, binds a texture
+/// <c>XT1 Studio.exe --uitest [file]</c>: builds the real UI control tree off-screen, binds a texture
 /// to the properties panel and pumps the message loop, printing a timestamp per step. Used to
 /// locate layout/UI hangs without a human at the keyboard.
 /// </summary>
@@ -210,6 +210,16 @@ internal static class UiSmoke
             Expect(log, emptyMenu.Contains("Add texture from image...|enabled"),
                 "an empty bank can still be filled", string.Join(", ", emptyMenu));
 
+            // What the settings dialog's OK does, without the dialog: the native tools are unloaded
+            // and loaded again. Disposing the encoder *and* the library it owns used to unload the
+            // same handle twice, which threw out of the menu handler.
+            Step("--- settings apply ---");
+            log($"       before: {inspectorForm.UiTestBackendState}");
+            inspectorForm.UiTestApplySettings();
+            Pump(log, ref watch, "settings applied", 40);
+            Expect(log, inspectorForm.UiTestBackendState.StartsWith("NVTT.dll: "),
+                "settings apply reloads the native tools", inspectorForm.UiTestBackendState);
+
             inspectorForm.Close();
             Step("inspector MainForm closed");
 
@@ -225,6 +235,15 @@ internal static class UiSmoke
                     r.EditorLeft < r.LabelRight - 2 || Math.Abs(r.LabelCenterY - r.EditorCenterY) > 6);
                 Expect(log, rows.Count > 0 && misaligned == 0, "settings rows align",
                     $"{rows.Count} rows, {misaligned} misaligned");
+
+                // The Explorer row reports the registration state and only offers to act when the
+                // shell host is actually deployed. (Reading state only; the smoke never registers.)
+                var shellRow = settingsDialog.UiTestShellRow();
+                Expect(log,
+                    (shellRow.Button == "Register" || shellRow.Button == "Remove") &&
+                    shellRow.Status.Length > 0 &&
+                    shellRow.Enabled == (Xt1.Shell.ShellRegistration.FindComHost() is not null),
+                    "settings exposes the Explorer thumbnail row", $"{shellRow.Button} / {shellRow.Status}");
                 settingsDialog.Close();
             }
             using (var newBank = new Forms.NewBankDialog())
@@ -238,6 +257,18 @@ internal static class UiSmoke
             {
                 recompress.Show();
                 Pump(log, ref watch, "batch-recompress dialog shown", 40);
+                var mixedQuality = recompress.UiTestQualityState();
+                Expect(log, mixedQuality.OpaqueLabel == "Opaque quality" && mixedQuality.AlphaVisible,
+                    "mixed recompress rules expose separate opaque and alpha quality",
+                    $"label={mixedQuality.OpaqueLabel}, alphaVisible={mixedQuality.AlphaVisible}");
+                Expect(log, Enum.GetNames<Xt1.Core.Encoding.EncodeQuality>().All(mixedQuality.Qualities.Contains),
+                    "batch recompress exposes every NVTT quality",
+                    string.Join(", ", mixedQuality.Qualities));
+                recompress.UiTestSelectRule(Xt1.Core.Editing.RecompressFormatRule.AlwaysBc7);
+                var fixedQuality = recompress.UiTestQualityState();
+                Expect(log, fixedQuality.OpaqueLabel == "Quality" && !fixedQuality.AlphaVisible,
+                    "fixed recompress rules show one quality selector",
+                    $"label={fixedQuality.OpaqueLabel}, alphaVisible={fixedQuality.AlphaVisible}");
                 recompress.Close();
             }
             using (var import = new Forms.TextureImportDialog("test.png",

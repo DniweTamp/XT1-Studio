@@ -4,7 +4,7 @@ using Xt1.Core.Containers;
 namespace Xt1.App;
 
 /// <summary>
-/// <c>Xt1.App.exe --dump-tree &lt;file|folder&gt;</c>: prints the container → sub-file → texture
+/// <c>XT1 Studio.exe --dump-tree &lt;file|folder&gt;</c>: prints the container → sub-file → texture
 /// hierarchy the UI tree shows, and decodes every supported base mip to prove the payload lines
 /// up. Given a folder it scans every bank file and reports an aggregate.
 /// </summary>

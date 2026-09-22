@@ -88,7 +88,7 @@ public sealed class NvttNative : IDisposable
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate uint VersionFn();
 
-    private readonly IntPtr _handle;
+    private IntPtr _handle;
     private readonly CreateSurfaceFn _createSurface;
     private readonly DestroySurfaceFn _destroySurface;
     private readonly SetImageDataFn _setImageData;
@@ -277,10 +277,18 @@ public sealed class NvttNative : IDisposable
         return bgra;
     }
 
+    /// <summary>
+    /// Unload the native library. Idempotent: the encoder built on this instance disposes it too
+    /// (<see cref="NvttEncoder.Dispose"/>), and a caller disposing both used to call FreeLibrary on
+    /// the same handle twice, which throws "Operation is not valid due to the current state of the
+    /// object" from <c>NativeLibrary.Free</c>. Only the first caller frees, and the exchange makes
+    /// that true from any thread.
+    /// </summary>
     public void Dispose()
     {
-        if (_handle != IntPtr.Zero)
-            NativeLibrary.Free(_handle);
+        var handle = Interlocked.Exchange(ref _handle, IntPtr.Zero);
+        if (handle != IntPtr.Zero)
+            NativeLibrary.Free(handle);
     }
 
     private sealed class CaptureSink

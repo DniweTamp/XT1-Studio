@@ -8,7 +8,7 @@ using Xt1.Core.Util;
 namespace Xt1.App;
 
 /// <summary>
-/// <c>Xt1.App.exe --export-decode &lt;file&gt; &lt;out.png|outDir&gt; [options]</c>: decode a texture and
+/// <c>XT1 Studio.exe --export-decode &lt;file&gt; &lt;out.png|outDir&gt; [options]</c>: decode a texture and
 /// write it as a PNG so the layout can be inspected visually. Layout overrides exist to compare
 /// candidate geometries for the records whose stored <c>imageSize</c> disagrees with the formula.
 /// </summary>

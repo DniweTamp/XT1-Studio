@@ -38,7 +38,7 @@ framework-dependent, `win-x64`, single file, ReadyToRun off) and writes to
 .\publish-release.bat /nopause            # no "press any key" at the end
 ```
 
-All managed assemblies are bundled into `Xt1.App.exe`. In the default (profile) mode the native
+All managed assemblies are bundled into `XT1 Studio.exe`. In the default (profile) mode the native
 `glfw3.dll` (OpenGL windowing) sits next to it, plus `.pdb` symbols; `/bundle-natives` folds the
 natives in too so the folder contains only the executable.
 Framework-dependent output requires the .NET 8 Desktop Runtime on the target machine.
@@ -47,13 +47,15 @@ Framework-dependent output requires the .NET 8 Desktop Runtime on the target mac
 
 ```powershell
 .\publish-release.bat /nopause     # runs it automatically after publishing
-src\Xt1.App\bin\Debug\net8.0-windows\Xt1.App.exe --selfcheck
-src\Xt1.App\bin\Debug\net8.0-windows\Xt1.App.exe --dump-tree D:\Bayonetta3\romfs\ui\ui_core.dat
-src\Xt1.App\bin\Debug\net8.0-windows\Xt1.App.exe --uitest D:\Bayonetta3\romfs\em\em0000.dat
-src\Xt1.App\bin\Debug\net8.0-windows\Xt1.App.exe --export-decode <file> <out.png> --index 3 --slice 8
-src\Xt1.App\bin\Debug\net8.0-windows\Xt1.App.exe --export-decode <file> x --hash 0x482960F9 --scan-layouts
-src\Xt1.App\bin\Debug\net8.0-windows\Xt1.App.exe --gltest D:\Bayonetta3\romfs\core\core.dat --out %TEMP%\gl
-src\Xt1.App\bin\Debug\net8.0-windows\Xt1.App.exe --panelshot D:\Bayonetta3\romfs\core\core.dat %TEMP%\panel.png --tree
+& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --selfcheck
+& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --dump-tree D:\Bayonetta3\romfs\ui\ui_core.dat
+& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --uitest D:\Bayonetta3\romfs\em\em0000.dat
+& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --export-decode <file> <out.png> --index 3 --slice 8
+& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --export-decode <file> x --hash 0x482960F9 --scan-layouts
+& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --thumbnail <file.xt1> <out.png> --size 256
+& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --register-shell     # .xt1 thumbnails in Explorer
+& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --gltest D:\Bayonetta3\romfs\core\core.dat --out $env:TEMP\gl
+& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --panelshot D:\Bayonetta3\romfs\core\core.dat $env:TEMP\panel.png --tree
 ```
 
 `--export-decode` writes a decode as PNG so a layout can be inspected by eye (`--mip`, `--slice`,
@@ -61,6 +63,67 @@ src\Xt1.App\bin\Debug\net8.0-windows\Xt1.App.exe --panelshot D:\Bayonetta3\romfs
 candidates scoring each one. The score is the surface's **padding fill**, which some atlases write
 as magenta (255,0,255): a wrong stride drags padding into the image. That objective is how the
 `ui_core.dat` 1026x1026 atlas was pinned down (3072-byte pitch → 6 magenta pixels; 2752 → 78,594).
+
+`--thumbnail <file.xt1> <out.png> [--size N] [--mip M] [--face F] [--slice S]` renders one loose
+`.xt1` (a single texture: header + payload) to a thumbnail. It decodes the **cheapest mip that still
+covers the requested size** instead of the base level followed by a downscale — a 512x512 ASTC
+texture at `--size 64` decodes mip 3 directly (107 ms measured, against 172 ms for the full 512x512) —
+and never upscales: a texture smaller than the request comes back at its own size. HDR (BC6H)
+textures are Reinhard-tone-mapped and sRGB encoded, matching the GL preview. Exit codes: 0 written,
+1 decode/write failed, 2 bad usage or not a loose XT1.
+
+The same rendering backs the Explorer thumbnail handler, and the subcommand stays useful on its own
+for scripting. Banks (`.dat`/`.wta`/`.wtb` and their `.dtt`/`.wtp` payloads) are rejected: a bank is
+many textures, so "the" thumbnail is ambiguous — export the texture as `.xt1` first (the texture menu's
+Export → `.xt1`).
+
+### Explorer thumbnails
+
+```powershell
+& ".\XT1 Studio.exe" --register-shell                    # current user, no administrator needed
+& ".\XT1 Studio.exe" --register-shell --machine          # all users (elevated shell)
+& ".\XT1 Studio.exe" --unregister-shell [--machine]
+```
+
+The same thing lives in the GUI: **Settings → Explorer → “Thumbnails for .xt1”**, with a *for all
+users* checkbox, a status line showing the current state, and a button that reads Register or Remove.
+That is the path to give somebody else: hand them the published folder (keeping `shell\` beside
+`XT1 Studio.exe`), have them open Settings and click Register once — no command line involved.
+
+Windows only thumbnails a file type through an in-process COM server registered per extension
+(`IThumbnailProvider`); it never launches an external program, so `--thumbnail` alone would not show
+anything. `src\Xt1.Shell` is that COM server: `Xt1ThumbnailProvider` decodes through the same
+`Thumbnailer` (cheapest sufficient mip, HDR tone mapping) and returns a premultiplied 32bpp DIB, and
+`ShellRegistration` writes the registry entries:
+
+```
+HKCU\Software\Classes\.xt1\ShellEx\{e357fccd-a995-4576-b01f-234630154e96} = {CLSID}
+HKCU\Software\Classes\.xt1\PerceivedType = image
+HKCU\Software\Classes\CLSID\{CLSID}\InprocServer32 = <app>\shell\Xt1.Shell.comhost.dll
+    ThreadingModel = Apartment   (required for shell extension handlers)
+    Class = Xt1.Shell.Xt1ThumbnailProvider   Assembly = Xt1.Shell
+```
+
+A .NET 8 assembly cannot be loaded by the shell directly, so the handler is built with
+`EnableComHosting`: `Xt1.Shell.comhost.dll` is a native DLL exporting `DllGetClassObject` that
+bootstraps the runtime in whatever process asks. Windows 11 extracts thumbnails in a `dllhost.exe`
+surrogate, which loads the com host, runs the handler and caches the result. The com host cannot live
+inside the app's single-file exe, so the publish copies it (with `Xt1.Core` and its dependencies) into
+a `shell` folder beside `XT1 Studio.exe`; `--register-shell` points at that copy.
+
+Caveats worth knowing:
+
+- The .NET 8 runtime is required, as it is for the app; a missing runtime means no thumbnails and no
+  error. The handler is loaded into the surrogate as ordinary user code, so it is worth signing if it
+  is distributed widely.
+- Registering per-user works and needs no administrator. `--machine` writes the same entries to HKLM
+  for every user on the machine.
+- Explorer caches thumbnails per file, so restart Explorer (or clear the thumbnail cache) to refresh
+  files it has already listed. A dllhost surrogate keeps the DLL loaded for a while after a request,
+  which is why the app's copy of `shell\` is best-effort (a build while a thumbnail is cached logs a
+  warning instead of failing).
+- Thumbnails are produced for loose `.xt1` files only; a `.dat`/`.wta`/`.wtb` bank keeps its icon.
+  The icon shown for `.xt1` itself is still the generic one, since no file-type icon is registered.
 
 `--gltest` assembles every 3D texture (or, with `--bank`, every cubemap) in the real viewport,
 renders it offscreen and checks the result numerically, writing the frames as PNGs: that the volume
@@ -97,10 +160,10 @@ These were re-derived from `D:\Bayonetta3\romfs` and are locked by tests:
 | 2D imageSize | Per-mip `align512(pitch * round_up(heightBlocks, lines))`; verified over the whole `pl/` + `em/` census |
 | 3D imageSize | Per-mip `align512(prev) + surface2d(w_m, h_m) * max(1, depth >> m)` (mip-major, slice-minor); verified on all `core.dat` 3D records incl. 128³/8 mips |
 | Cube imageSize | `6 * faceStride`, where `faceStride = align4096(faceSize)` only when the base mip surface is >= 4096 bytes; verified on every cube group |
-| Wide pitch (`tile_width_spacing = 4`) | A record with `blockHeightLog2 == 3` whose base-mip row is not 1024-aligned widens every non-"small" mip to a 1024-byte pitch. This explains the former multi-mip ASTC 5×5/6×6 class exactly (915456 / 1385472 / 4596736), so **no record is left flagged**; the layout exposes it as `WidePitchApplied` and the tree dump counts `widePitch` |
+| Wide pitch (`tile_width_spacing = 4`) | A record with layout bit `0x400`, `blockHeightLog2 == 3`, and a base-mip row that is not 1024-aligned widens every non-"small" mip to a 1024-byte pitch. See `XT1_FORMAT.md` §6 for the canonical predicate. This explains the former multi-mip ASTC 5×5/6×6 class exactly (915456 / 1385472 / 4596736), so **no record is left flagged**; the layout exposes it as `WidePitchApplied` and the tree dump counts `widePitch` |
 | DAT container | 4-byte descriptor = sub-file size; tables 4-byte aligned; sub-files packed contiguously; `.dtt` payload base is 0x1000. Offsets are **not always monotonic**: stub entries are `0` and some sub-files alias a region nested inside another (`es*.dat` keeps its `"wta"` inside its embedded `"eff"` DAT), so a sub-file range comes from the declared size when it fits |
 | GOB swizzle | Tegra block-linear. A GOB is 64x8 bytes; `blockHeight` stacks GOBs vertically and **`blockDepth` stacks slices**, so 3D Z is interleaved. Addressing follows the `tegra_swizzle` reference (Ryujinx / Tegra TRM) and `Swizzle`/`Deswizzle` are exact inverses |
-| `textureLayout` | Low 3 bits = `blockHeightLog2`; **bits 4..6 = `blockDepthLog2`** (0 for 2D, 4 = block depth 16 for every 3D record) |
+| `textureLayout` | Low 3 bits = `blockHeightLog2`; **bits 4..6 = `blockDepthLog2`** (0 for 2D, 4 = block depth 16 for every 3D record); bit `0x400` selects the wide-pitch layout class |
 | Wide-pitch chain | `em305c` #2 (ASTC 5×5 2050x2050, 11 mips) decomposes exactly: pitches `[7168,4096,2048,832,448,256,128,64,64,64,64]`, total 4596736. The pitch must be fed to the swizzle or the magenta padding leaks in (3072 → 6 pixels, 2752 → 78,594). The 47 single-mip cases are the same mechanism; the stored-size back-solve is now only a fallback and no longer fires |
 | Cube faces | A face is `align4096`-ed **only when its base mip surface reaches 4096 bytes**, never when the whole chain merely exceeds a page: 8x8 BC3s → 512/face (dense), BC1 64x64/7 → 5120/face (dense, total 30720), BC3 64x64/7 → 8192/face (total 49152) |
 | Formats | `0x01` (`"af"`) is a single uncompressed 8-bit channel at 1 byte/px (not compressed — corrected, see below); `0x6D` is uncompressed 32 bpp (decode-only, channel order unconfirmed) |
@@ -115,7 +178,8 @@ These were re-derived from `D:\Bayonetta3\romfs` and are locked by tests:
 ```
 src/Xt1.Core   net8.0, no UI: containers, XT1 model, swizzle, layout, codecs, NVTT interop, writers, editing
 src/Xt1.App    net8.0-windows: WinForms shell, GDI+ 2D viewer, OpenGL cubemap/volume viewport, dialogs
-tests/Xt1.Core.Tests  441 tests, real-file validation against D:\Bayonetta3\romfs when present
+src/Xt1.Shell  net8.0-windows: the .xt1 Explorer thumbnail handler (IThumbnailProvider + COM host)
+tests/Xt1.Core.Tests  453 tests, real-file validation against D:\Bayonetta3\romfs when present
 ```
 
 `Xt1.Core` is headless and fully testable; the app only consumes it. The window and executable icon is
@@ -126,6 +190,9 @@ tests/Xt1.Core.Tests  441 tests, real-file validation against D:\Bayonetta3\romf
 
 - Open `.wta`, `.dat`, `.dtt`, `.wtb`, `.xt1`; a `.dat` pairs automatically with its `.dtt`
   (and vice versa), and a split `.wta` automatically pairs with its sibling `.wtp`.
+- Explorer thumbnails for loose `.xt1` textures (`--register-shell`): a real shell handler decodes
+  each file's cheapest sufficient mip, so browsing a folder of textures shows their contents instead
+  of a generic icon. See [Explorer thumbnails](#explorer-thumbnails).
 - File browser over the container tree: a column list (Name / Modified / Size, click a header to sort,
   columns are drag-resizeable) of every openable file (`.dat`, `.wta`, `.wtb`, `.xt1`) in the active
   document's folder, with the selected file's bank/texture tree below it. Picking a row loads that
@@ -156,8 +223,8 @@ tests/Xt1.Core.Tests  441 tests, real-file validation against D:\Bayonetta3\romf
   The same hierarchy is available headlessly, for one file or a whole folder:
 
   ```powershell
-  Xt1.App.exe --dump-tree <file>     # tree + per-texture decode check
-  Xt1.App.exe --dump-tree <folder>   # scan every .wta/.wtb/.dat/.xt1 recursively
+  & ".\XT1 Studio.exe" --dump-tree <file>     # tree + per-texture decode check
+  & ".\XT1 Studio.exe" --dump-tree <folder>   # scan every .wta/.wtb/.dat/.xt1 recursively
   ```
 
   A folder scan decodes every supported base mip, so it doubles as a validation pass. On a full
@@ -285,6 +352,16 @@ sRGB, and the real table comes from `XT1_FORMAT.md`.
   override, and the base mip still previews from the stored size.
 - Payloads shorter than the computed surface decode with zero-fill and a warning rather than
   throwing (malformed/truncated banks stay loadable).
-- `Xt1.App.exe --selfcheck` runs the headless integration check (native tools, codecs, golden
-  bank load, byte-identical no-edit save, and a save→reload validation that re-encodes a texture
-  at a new size and verifies every `table0` offset).
+- `XT1 Studio.exe --selfcheck` runs the headless integration check (native tools, codecs, golden
+  bank load, byte-identical no-edit save, a save→reload validation that re-encodes a texture at a
+  new size and verifies every `table0` offset, a `--thumbnail` pass that exports a real texture as a
+  loose `.xt1` and runs the command line over it, and a shell-handler pass that initializes
+  `Xt1ThumbnailProvider` from that file and checks the 32bpp DIB it returns — plus that the COM host
+  is deployed beside the app, which is what `--register-shell` needs).
+- A thumbnail never costs a full decode when a cheap mip will do: `--thumbnail` (and the shell host
+  that calls it) decodes the smallest level that still covers the request, so a 4096-wide texture is
+  a 256-wide decode rather than a full one plus a downscale.
+- Unloading NVTT is idempotent (`Interlocked.Exchange` on the handle). The encoder owns and frees the
+  library it was built on, and saving settings used to free the same handle again through the raw
+  `NvttNative`, which threw `InvalidOperationException` out of `NativeLibrary.Free` — the OK button
+  in Settings crashed with NVTT loaded. `--uitest` now exercises the settings-apply path too.
