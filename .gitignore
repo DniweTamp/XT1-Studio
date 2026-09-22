@@ -2,17 +2,116 @@
 bin/
 obj/
 publish/
+publish-*/
 
-# Visual Studio / Rider
-.vs/
+# ReSharper / Rider
 .idea/
+_ReSharper*/
+*.DotSettings
+*.DotSettings.user
+*.DotCover
+*.coverage
+*.coverage.xml
+*.run
+*.runconfig
+
+# Visual Studio
 *.user
+*.userosscache
+*.sln.docstates
+*.sln.docstates.s
 *.suo
 *.userprefs
+*.vs/
+*.VC.db
+*.VC.VC.opendb
+*.aps
+*.pch
+*.pch.*
+*.vspscc
+*.vssscc
+*.scc
+*.tlb
+*.tlh
+*.tli
+*.tmp
+*.temp
+*.tmp.*
+*.bak
+*.err
+*.log
+
+# NuGet
+packages/
+**/.nuget/*
+**/.nuget/**/global.json
+**/.nuget/**/*.props
+**/.nuget/**/*.targets
+*.nuget.config
+nuget.exe
+NuGet.exe
+NuGetScratch
+*.nuget.dgspec.json
+
+# .NET
+*.deps.json
+*.runtimeconfig.json
+*.runtimeconfig.template.json
+*.genruntimeconfig.cache
+*.AssemblyInfo.cs
+*.AssemblyInfoInputs.cache
+*.assets.cache
+*.AssemblyReference.cache
+*.CoreCompileInputs.cache
+*.FilelistAbsolute.txt
+*.Up2Date
+*.GlobalUsings.g.cs
+*.GeneratedMSBuildEditorConfig.editorconfig
+*.genbundle.cache
+*.genpublishdeps.cache
+*.dll
+*.exe
+*.pdb
+*.cache
+TestResults/
+**/TestResults/
+*.testrun
+*_Visible-D41d8cd9-
+
+# Project
+*.pfx
+*.p12
+*.key
+*.key.user
 
 # VS Code
 .vscode/
+*.code-workspace
 
 # OS
 Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
 desktop.ini
+.DS_Store
+.AppleDouble
+.LSOverride
+.Icon?
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+.SymLink
+
+# Kilo (local agent config)
+.kilo/
