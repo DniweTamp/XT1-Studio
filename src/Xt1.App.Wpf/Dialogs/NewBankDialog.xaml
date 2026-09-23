@@ -1,0 +1,42 @@
+﻿<dialogs:ThemedDialog x:Class="Xt1.App.Wpf.Dialogs.NewBankDialog"
+                      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                      xmlns:dialogs="clr-namespace:Xt1.App.Wpf.Dialogs"
+                      Title="New empty bank" Width="470" Height="260" ResizeMode="NoResize"
+                      Background="{DynamicResource Brush.Window}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="18,18,18,0">
+            <RadioButton Style="{StaticResource DialogRadio}" GroupName="BankShape"
+                         IsChecked="True">
+                <StackPanel>
+                    <TextBlock Text="Split bank (.wta + .wtp)" />
+                    <TextBlock Style="{StaticResource DialogHint}" Margin="0,3,0,0"
+                               Text="A header file plus a separate payload stream. This layout is used all over the game (models, UI, effects), not just for effects." />
+                </StackPanel>
+            </RadioButton>
+            <RadioButton x:Name="StandaloneRadio" Style="{StaticResource DialogRadio}" GroupName="BankShape"
+                         Margin="0,8,0,0">
+                <StackPanel>
+                    <TextBlock Text="Standalone bank (.wtb)" />
+                    <TextBlock Style="{StaticResource DialogHint}" Margin="0,3,0,0"
+                               Text="A single file with the payload inline." />
+                </StackPanel>
+            </RadioButton>
+        </StackPanel>
+
+        <Border Grid.Row="1" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="18,10">
+            <StackPanel Style="{StaticResource DialogButtonRow}">
+                <Button Style="{StaticResource PillButton}" Content="Create" IsDefault="True" MinWidth="84"
+                        Click="OnCreate" />
+                <Button Style="{StaticResource PillButton}" Content="Cancel" IsCancel="True" MinWidth="84"
+                        Margin="8,0,0,0" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</dialogs:ThemedDialog>
+

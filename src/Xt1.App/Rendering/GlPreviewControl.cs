@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using OpenTK.GLControl;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.Common;
+using Xt1.App.Theming;
 using Xt1.Core.Imaging;
 using Xt1.Core.Rendering;
 
@@ -38,7 +39,7 @@ public enum VolumeRenderMode
 /// Degrades gracefully (leaves <see cref="Available"/> false) when the GL context or shaders are
 /// unavailable.
 /// </summary>
-public sealed class GlPreviewControl : GLControl
+public sealed class GlPreviewControl : GLControl, IThemedControl
 {
     private PreviewMode _mode = PreviewMode.Cube;
 
@@ -71,9 +72,16 @@ public sealed class GlPreviewControl : GLControl
             IsEventDriven = false,
         })
     {
-        BackColor = Color.FromArgb(24, 24, 28);
+        BackColor = ThemeManager.Palette.Viewer;
         SetStyle(ControlStyles.Selectable, true);
         TabStop = true;
+    }
+
+    /// <summary>The GL canvas keeps its dark backdrop in both themes.</summary>
+    public void ApplyTheme(ThemePalette palette)
+    {
+        BackColor = palette.Viewer;
+        Invalidate();
     }
 
     /// <summary>Arrow keys drive the look control, so they must reach the control instead of navigating.</summary>

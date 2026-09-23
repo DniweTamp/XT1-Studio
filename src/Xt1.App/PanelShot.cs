@@ -65,7 +65,7 @@ internal static class PanelShot
             {
                 bitmap = new Bitmap(treeShot.Width + inspector.Width, Math.Max(treeShot.Height, inspector.Height));
                 using var graphics = Graphics.FromImage(bitmap);
-                graphics.Clear(Color.FromArgb(246, 246, 249));
+                graphics.Clear(Xt1.App.Theming.ThemeManager.Palette.Window);
                 graphics.DrawImage(treeShot, 0, 0);
                 graphics.DrawImage(inspector, treeShot.Width, 0);
             }

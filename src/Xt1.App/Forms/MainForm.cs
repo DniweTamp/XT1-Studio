@@ -1,6 +1,7 @@
 using Xt1.App.Controls;
 using Xt1.App.Rendering;
 using Xt1.App.Services;
+using Xt1.App.Theming;
 using Xt1.Core.Codecs;
 using Xt1.Core.Containers;
 using Xt1.Core.Editing;
@@ -15,7 +16,7 @@ using Xt1.Core.Xt1;
 
 namespace Xt1.App.Forms;
 
-public sealed class MainForm : Form
+public sealed class MainForm : ThemedForm
 {
     private readonly AppSettings _settings;
     private ResolvedTools _tools;
@@ -86,7 +87,7 @@ public sealed class MainForm : Form
     private Font ActiveFileFont => _activeFileFont ??= new Font(_fileList.Font, FontStyle.Bold);
     private readonly Image2DViewer _imageViewer = new() { Dock = DockStyle.Fill };
     private readonly GlPreviewControl _glPreview = new() { Dock = DockStyle.Fill };
-    private readonly TabControl _viewTabs = new() { Dock = DockStyle.Fill };
+    private readonly ThemedTabControl _viewTabs = new() { Dock = DockStyle.Fill };
     private readonly TextureInspectorPanel _inspector = new() { Dock = DockStyle.Fill };
     private readonly HexEditorControl _hexPanel = new() { Dock = DockStyle.Fill };
     private Form? _hexDialog;
@@ -137,10 +138,15 @@ public sealed class MainForm : Form
     private readonly string? _initialFile;
     private SplitContainer _outerSplit = null!;
     private SplitContainer _innerSplit = null!;
+    private ToolStripMenuItem _themeSystem = null!;
+    private ToolStripMenuItem _themeLight = null!;
+    private ToolStripMenuItem _themeDark = null!;
 
     public MainForm(string? initialFile = null)
     {
         _settings = AppSettings.Load();
+        // Applied before the form is shown, so the window opens already in the right theme.
+        ThemeManager.Initialize(_settings.Theme);
         _tools = _settings.Resolve();
         _initialFile = initialFile;
 
@@ -233,6 +239,17 @@ public sealed class MainForm : Form
         tools.DropDownItems.Add("&Settings...", null, (_, _) => ShowSettings());
         tools.DropDownItems.Add("&Batch recompress (ASTC to BC)...", null, (_, _) => ShowBatchRecompress());
 
+        // Theme choice: System follows the OS preference (the install default); Light/Dark pin it.
+        var view = new ToolStripMenuItem("&View");
+        var theme = new ToolStripMenuItem("&Theme");
+        _themeSystem = new ToolStripMenuItem("&System", null, (_, _) => ChooseTheme(AppTheme.System));
+        _themeLight = new ToolStripMenuItem("&Light", null, (_, _) => ChooseTheme(AppTheme.Light));
+        _themeDark = new ToolStripMenuItem("&Dark", null, (_, _) => ChooseTheme(AppTheme.Dark));
+        theme.DropDownItems.Add(_themeSystem);
+        theme.DropDownItems.Add(_themeLight);
+        theme.DropDownItems.Add(_themeDark);
+        view.DropDownItems.Add(theme);
+
         var help = new ToolStripMenuItem("&Help");
         help.DropDownItems.Add("&About", null, (_, _) => MessageBox.Show(this,
             "XT1 Studio\nViewer/editor for PlatinumGames WTB/XT1 texture banks.\n\nFormat reference: XT1_FORMAT.md",
@@ -240,10 +257,29 @@ public sealed class MainForm : Form
 
         menu.Items.Add(file);
         menu.Items.Add(edit);
+        menu.Items.Add(view);
         menu.Items.Add(tools);
         menu.Items.Add(help);
         MainMenuStrip = menu;
         Controls.Add(menu);
+        UpdateThemeChecks();
+    }
+
+    /// <summary>Persist and apply the user's theme choice, then refresh the menu ticks.</summary>
+    private void ChooseTheme(AppTheme preference)
+    {
+        _settings.Theme = preference;
+        _settings.Save();
+        ThemeManager.SetPreference(preference);
+        ThemeManager.ApplyTo(_treeMenu);
+        UpdateThemeChecks();
+    }
+
+    private void UpdateThemeChecks()
+    {
+        _themeSystem.Checked = _settings.Theme == AppTheme.System;
+        _themeLight.Checked = _settings.Theme == AppTheme.Light;
+        _themeDark.Checked = _settings.Theme == AppTheme.Dark;
     }
 
     /// <summary>
@@ -291,6 +327,9 @@ public sealed class MainForm : Form
             _tree.SelectedNode = e.Node;
         };
         _tree.ContextMenuStrip = _treeMenu;
+        // The context menu is not in the form's control tree, so theme it once here (and again in
+        // ChooseTheme when the palette changes).
+        ThemeManager.ApplyTo(_treeMenu);
     }
 
     private static ToolStripMenuItem NewTreeMenuItem(string text, EventHandler onClick)
@@ -393,51 +432,63 @@ public sealed class MainForm : Form
     /// <summary>Slice/render controls live under the GL viewport (they are plain WinForms controls).</summary>
     private Panel BuildSliceBar()
     {
-        var panel = new Panel { Dock = DockStyle.Bottom, Height = 32 };
+        // Two flows in a table: the slice/render controls on the left, the gamma/exposure pair pinned
+        // to the right edge, so a narrow viewport can never push them over each other.
+        var panel = new Panel { Dock = DockStyle.Bottom, Height = 36, Padding = new Padding(8, 4, 8, 4) };
 
-        _sliceLabel.Location = new Point(8, 8);
-        _sliceCombo.Location = new Point(48, 4);
-        _sliceCombo.Width = 100;
-        _sliceTrack.Location = new Point(154, 2);
+        var left = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoSize = false,
+            WrapContents = false,
+            FlowDirection = FlowDirection.LeftToRight,
+            Margin = new Padding(0),
+        };
+        _sliceLabel.Margin = new Padding(0, 7, 4, 0);
+        _sliceCombo.Margin = new Padding(0, 4, 10, 0);
+        _sliceTrack.Margin = new Padding(0, 6, 10, 0);
         _sliceTrack.Value = 50;
-        _volumeLabel.Location = new Point(284, 7);
-        _volumeMode.Location = new Point(336, 4);
-        _showSlices.Location = new Point(414, 7);
+        _volumeLabel.Margin = new Padding(0, 7, 4, 0);
+        _volumeMode.Margin = new Padding(0, 4, 10, 0);
+        _showSlices.Margin = new Padding(0, 9, 10, 0);
+        left.Controls.Add(_sliceLabel);
+        left.Controls.Add(_sliceCombo);
+        left.Controls.Add(_sliceTrack);
+        left.Controls.Add(_volumeLabel);
+        left.Controls.Add(_volumeMode);
+        left.Controls.Add(_showSlices);
 
-        // Gamma/exposure are pinned to the right edge in their own flow panel so a narrower viewport
-        // can never push the GL surface over them.
         var adjustments = new FlowLayoutPanel
         {
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             WrapContents = false,
             FlowDirection = FlowDirection.LeftToRight,
+            Anchor = AnchorStyles.Right,
             Margin = new Padding(0),
         };
-        _gammaLabel.Margin = new Padding(0, 6, 4, 0);
-        _gammaBox.Margin = new Padding(0, 3, 14, 0);
-        _exposureLabel.Margin = new Padding(0, 6, 4, 0);
-        _exposureBox.Margin = new Padding(0, 3, 0, 0);
+        _gammaLabel.Margin = new Padding(0, 7, 4, 0);
+        _gammaBox.Margin = new Padding(0, 4, 14, 0);
+        _exposureLabel.Margin = new Padding(0, 7, 4, 0);
+        _exposureBox.Margin = new Padding(0, 4, 0, 0);
         adjustments.Controls.Add(_gammaLabel);
         adjustments.Controls.Add(_gammaBox);
         adjustments.Controls.Add(_exposureLabel);
         adjustments.Controls.Add(_exposureBox);
 
-        panel.Controls.Add(_sliceLabel);
-        panel.Controls.Add(_sliceCombo);
-        panel.Controls.Add(_sliceTrack);
-        panel.Controls.Add(_volumeLabel);
-        panel.Controls.Add(_volumeMode);
-        panel.Controls.Add(_showSlices);
-        panel.Controls.Add(adjustments);
-        adjustments.BringToFront();
-
-        void AnchorAdjustments()
+        var bar = new TableLayoutPanel
         {
-            adjustments.Location = new Point(Math.Max(0, panel.ClientSize.Width - adjustments.Width - 8), 4);
-        }
-        panel.Resize += (_, _) => AnchorAdjustments();
-        AnchorAdjustments();
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0),
+        };
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        bar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        bar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        bar.Controls.Add(left, 0, 0);
+        bar.Controls.Add(adjustments, 1, 0);
+        panel.Controls.Add(bar);
 
         _glPreview.ShowSlices = _showSlices.Checked;
         _glPreview.Gamma = (float)_gammaBox.Value;
@@ -721,15 +772,7 @@ public sealed class MainForm : Form
         _fileList.Columns[2].Text = _fileSortColumn == "size" ? "Size" + indicator : "Size";
     }
 
-    private static string FormatSize(long bytes)
-    {
-        if (bytes < 1024) return $"{bytes} B";
-        double value = bytes / 1024.0;
-        if (value < 1024) return $"{value:0.#} KB";
-        value /= 1024.0;
-        if (value < 1024) return $"{value:0.#} MB";
-        return $"{value / 1024.0:0.##} GB";
-    }
+    private static string FormatSize(long bytes) => ByteSize.Format(bytes);
 
     /// <summary>
     /// WinForms TreeView/ListView flicker on Clear() + rebuild; enabling their protected double
@@ -1851,7 +1894,7 @@ public sealed class MainForm : Form
 
         if (_hexDialog is null || _hexDialog.IsDisposed)
         {
-            _hexDialog = new Form
+            _hexDialog = new ThemedForm
             {
                 Text = "Raw bytes",
                 ClientSize = new Size(720, 560),

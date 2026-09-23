@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using Xt1.App.Theming;
 using Xt1.Core.Containers;
 using Xt1.Core.Editing;
 using Xt1.Core.Util;
@@ -18,20 +19,14 @@ namespace Xt1.App.Controls;
 /// The card structure is built once and only the values are refreshed, so switching between
 /// textures does not rebuild a control tree.
 /// </summary>
-public sealed class TextureInspectorPanel : UserControl
+public sealed class TextureInspectorPanel : UserControl, IThemedControl
 {
     private static readonly Font TitleFont = new("Segoe UI", 12.5f, FontStyle.Bold);
     private static readonly Font SubtitleFont = new("Segoe UI", 8.75f);
     private static readonly Font CardTitleFont = new("Segoe UI", 9f, FontStyle.Bold);
     private static readonly Font MonoFont = new("Consolas", 9.5f);
-    private static readonly Color MutedColor = Color.FromArgb(108, 108, 120);
-    private static readonly Color SubtitleColor = Color.FromArgb(132, 132, 146);
-    private static readonly Color HeadingColor = Color.FromArgb(46, 46, 56);
-    private static readonly Color WarnBack = Color.FromArgb(254, 240, 240);
-    private static readonly Color WarnColor = Color.FromArgb(170, 32, 32);
-    private static readonly Color OkColor = Color.FromArgb(62, 118, 70);
-    private static readonly Color OkBack = Color.FromArgb(240, 248, 240);
-    private static readonly Color PendingBack = Color.FromArgb(244, 244, 250);
+
+    private static ThemePalette Palette => ThemeManager.Palette;
 
     /// <summary>One shared tooltip for the whole panel; a per-control instance would be collected.</summary>
     private static readonly ToolTip Tips = new();
@@ -53,6 +48,9 @@ public sealed class TextureInspectorPanel : UserControl
     private readonly Label _subtitle;
     private readonly Label _spec;
     private readonly Panel _emptyHint;
+    private readonly TableLayoutPanel _stack;
+    private readonly Panel _scrollHost;
+    private readonly List<TableLayoutPanel> _cards = new();
 
     private BankDocument? _document;
     private BankSection? _section;
@@ -60,9 +58,13 @@ public sealed class TextureInspectorPanel : UserControl
     private bool _suppress;
     private bool _advanced;
 
+    private IReadOnlyList<string> _validationWarnings = Array.Empty<string>();
+    private string? _validationError;
+    private bool _validationPending;
+
     public TextureInspectorPanel()
     {
-        BackColor = Color.FromArgb(246, 246, 249);
+        BackColor = Palette.Window;
         Dock = DockStyle.Fill;
 
         var stack = new TableLayoutPanel
@@ -72,14 +74,18 @@ public sealed class TextureInspectorPanel : UserControl
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 1,
             BackColor = Color.Transparent,
-            Padding = new Padding(10, 10, 10, 10),
+            Padding = new Padding(12, 12, 12, 12),
         };
         stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        _stack = stack;
 
         // --- Identity --------------------------------------------------------------------
-        _title = new Label { AutoSize = true, Font = TitleFont, ForeColor = HeadingColor, Margin = new Padding(2, 0, 0, 0) };
-        _subtitle = new Label { AutoSize = true, Font = SubtitleFont, ForeColor = SubtitleColor, Margin = new Padding(3, 1, 0, 0) };
-        _spec = new Label { AutoSize = true, MaximumSize = new Size(400, 0), Font = SubtitleFont, ForeColor = MutedColor, Margin = new Padding(3, 1, 0, 6) };
+        _title = new Label { AutoSize = true, Font = TitleFont, ForeColor = Palette.HeadingText, Margin = new Padding(2, 0, 0, 0) };
+        _subtitle = new Label { AutoSize = true, Font = SubtitleFont, ForeColor = Palette.MutedText, Margin = new Padding(3, 1, 0, 0) };
+        _spec = new Label { AutoSize = true, MaximumSize = new Size(400, 0), Font = SubtitleFont, ForeColor = Palette.MutedText, Margin = new Padding(3, 1, 0, 6) };
+        ThemeManager.SetRole(_title, ThemeRole.Heading);
+        ThemeManager.SetRole(_subtitle, ThemeRole.Muted);
+        ThemeManager.SetRole(_spec, ThemeRole.Muted);
         var identity = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
@@ -98,25 +104,27 @@ public sealed class TextureInspectorPanel : UserControl
         AddToStack(stack, identity);
 
         _emptyHint = new Panel { Dock = DockStyle.Fill, AutoSize = true, Height = 40, BackColor = Color.Transparent };
-        _emptyHint.Controls.Add(new Label
+        var emptyLabel = new Label
         {
             Text = "Select a texture in the tree to inspect it.",
             AutoSize = true,
-            ForeColor = MutedColor,
+            ForeColor = Palette.MutedText,
             Location = new Point(4, 4),
-        });
+        };
+        ThemeManager.SetRole(emptyLabel, ThemeRole.Muted);
+        _emptyHint.Controls.Add(emptyLabel);
 
         // --- Validation ------------------------------------------------------------------
         // Directly under the identity so a texture that cannot be trusted is the first thing seen.
-        _validationText = new Label { AutoSize = true, MaximumSize = new Size(380, 0), Margin = new Padding(4, 2, 4, 2) };
+        _validationText = new Label { AutoSize = true, MaximumSize = new Size(380, 0), Margin = new Padding(2, 2, 2, 2) };
         _validationCard = new Panel
         {
             Dock = DockStyle.Fill,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Padding = new Padding(8, 6, 8, 6),
-            Margin = new Padding(0, 0, 0, 8),
-            BackColor = OkBack,
+            Padding = new Padding(10, 8, 10, 8),
+            Margin = new Padding(0, 0, 0, 10),
+            BackColor = Palette.OkBack,
         };
         _validationCard.Controls.Add(_validationText);
         AddToStack(stack, _validationCard);
@@ -139,7 +147,8 @@ public sealed class TextureInspectorPanel : UserControl
         _modelBox = NewFlag("Model / UI bank entry", "table2 byte 0, bit 0x20 - set for model and UI bank entries, clear otherwise");
         _srgbBox = NewFlag("sRGB color space", "table2 byte 3, bit 0x04");
         _cubeBox = NewFlag("Cube map usage", "table2 byte 3, bit 0x80");
-        _table2Note = new Label { AutoSize = true, ForeColor = MutedColor, Font = MonoFont, Margin = new Padding(0, 6, 0, 0) };
+        _table2Note = new Label { AutoSize = true, ForeColor = Palette.MutedText, Font = MonoFont, Margin = new Padding(0, 6, 0, 0) };
+        ThemeManager.SetRole(_table2Note, ThemeRole.Muted);
         var flagsCard = NewCard("Flags", out var flagsGrid);
         AddRow(flagsGrid, "Bank class", _modelBox);
         AddRow(flagsGrid, "Color", _srgbBox);
@@ -176,7 +185,8 @@ public sealed class TextureInspectorPanel : UserControl
             Width = 320,
             Height = 150,
             Font = MonoFont,
-            BackColor = Color.White,
+            BackColor = Palette.Input,
+            ForeColor = Palette.Text,
             Text = "(no technical summary)",
         };
 
@@ -199,7 +209,8 @@ public sealed class TextureInspectorPanel : UserControl
         _advancedHost.Controls.Add(advancedStack);
         AddToStack(stack, _advancedHost);
 
-        var scrollHost = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Color.FromArgb(246, 246, 249) };
+        var scrollHost = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Palette.Window };
+        _scrollHost = scrollHost;
         scrollHost.Controls.Add(stack);
         Controls.Add(scrollHost);
         Controls.Add(_emptyHint);
@@ -266,6 +277,10 @@ public sealed class TextureInspectorPanel : UserControl
     /// </summary>
     public void SetValidation(IReadOnlyList<string> warnings, string? decodeError, bool pending = false)
     {
+        _validationWarnings = warnings;
+        _validationError = decodeError;
+        _validationPending = pending;
+
         var lines = new List<string>();
         if (decodeError is not null) lines.Add("Decode failed: " + decodeError);
         foreach (var warning in warnings) lines.Add(warning);
@@ -273,17 +288,38 @@ public sealed class TextureInspectorPanel : UserControl
         bool bad = lines.Count > 0;
         if (pending && !bad)
         {
-            _validationCard.BackColor = PendingBack;
-            _validationText.ForeColor = MutedColor;
+            _validationCard.BackColor = Palette.PendingBack;
+            _validationText.ForeColor = Palette.MutedText;
             _validationText.Text = "Decoding volume...";
             return;
         }
 
-        _validationCard.BackColor = bad ? WarnBack : OkBack;
-        _validationText.ForeColor = bad ? WarnColor : OkColor;
+        _validationCard.BackColor = bad ? Palette.WarnBack : Palette.OkBack;
+        _validationText.ForeColor = bad ? Palette.WarnText : Palette.OkText;
         _validationText.Text = bad
             ? string.Join(Environment.NewLine, lines.Select(l => "- " + l))
             : "Decoded cleanly - the layout matches the stored image size.";
+    }
+
+    /// <summary>Repaint the whole panel for the active theme, cards and validation verdict included.</summary>
+    public void ApplyTheme(ThemePalette palette)
+    {
+        BackColor = palette.Window;
+        _scrollHost.BackColor = palette.Window;
+        ThemeManager.ApplyTo(_stack);
+        ThemeManager.ApplyTo(_emptyHint);
+
+        // The generic pass paints panels as window background; the cards sit on top of it.
+        foreach (var card in _cards) card.BackColor = palette.Surface;
+        _summaryBox.BackColor = palette.Input;
+
+        _title.ForeColor = palette.HeadingText;
+        _subtitle.ForeColor = palette.MutedText;
+        _spec.ForeColor = palette.MutedText;
+        _table2Note.ForeColor = palette.MutedText;
+
+        // Reassert the verdict colours, which depend on state rather than a static role.
+        SetValidation(_validationWarnings, _validationError, _validationPending);
     }
 
     // --- construction helpers -----------------------------------------------------------
@@ -296,7 +332,7 @@ public sealed class TextureInspectorPanel : UserControl
         stack.Controls.Add(card, 0, row);
     }
 
-    private static TableLayoutPanel NewCard(string title, out TableLayoutPanel grid)
+    private TableLayoutPanel NewCard(string title, out TableLayoutPanel grid)
     {
         var card = new TableLayoutPanel
         {
@@ -304,20 +340,21 @@ public sealed class TextureInspectorPanel : UserControl
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 1,
-            BackColor = Color.White,
-            BorderStyle = BorderStyle.FixedSingle,
-            Padding = new Padding(10, 8, 10, 9),
-            Margin = new Padding(0, 0, 0, 8),
+            BackColor = Palette.Surface,
+            Padding = new Padding(12, 10, 12, 11),
+            Margin = new Padding(0, 0, 0, 10),
         };
+        _cards.Add(card);
 
         var caption = new Label
         {
             Text = title,
             AutoSize = true,
             Font = CardTitleFont,
-            ForeColor = HeadingColor,
-            Margin = new Padding(0, 0, 0, 4),
+            ForeColor = Palette.HeadingText,
+            Margin = new Padding(0, 0, 0, 6),
         };
+        ThemeManager.SetRole(caption, ThemeRole.Heading);
 
         grid = new TableLayoutPanel
         {
@@ -328,7 +365,7 @@ public sealed class TextureInspectorPanel : UserControl
             BackColor = Color.Transparent,
             Margin = new Padding(0),
         };
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 108));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 96));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
 
         card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -345,14 +382,16 @@ public sealed class TextureInspectorPanel : UserControl
 
         if (caption.Length > 0)
         {
-            grid.Controls.Add(new Label
+            var label = new Label
             {
                 Text = caption,
                 AutoSize = true,
-                ForeColor = MutedColor,
+                ForeColor = Palette.MutedText,
                 Anchor = AnchorStyles.Left,
                 Margin = new Padding(0, 5, 6, 0),
-            }, 0, row);
+            };
+            ThemeManager.SetRole(label, ThemeRole.Muted);
+            grid.Controls.Add(label, 0, row);
         }
 
         editor.Anchor = AnchorStyles.Left;
@@ -369,12 +408,7 @@ public sealed class TextureInspectorPanel : UserControl
 
     private void SetTip(Control control, string text) => Tips.SetToolTip(control, text);
 
-    private static string FormatSize(long bytes)
-    {
-        if (bytes >= 1024L * 1024) return $"{bytes / (1024.0 * 1024.0):0.##} MiB";
-        if (bytes >= 1024) return $"{bytes / 1024.0:0.#} KiB";
-        return bytes + " B";
-    }
+    private static string FormatSize(long bytes) => ByteSize.Format(bytes);
 
     // --- wiring -------------------------------------------------------------------------
 

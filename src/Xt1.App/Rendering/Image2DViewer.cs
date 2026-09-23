@@ -1,5 +1,6 @@
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using Xt1.App.Theming;
 using Xt1.Core.Imaging;
 
 namespace Xt1.App.Rendering;
@@ -14,7 +15,7 @@ public enum ImageChannelMode
 }
 
 /// <summary>Pan/zoom RGBA image viewer with channel isolation and optional gamma display.</summary>
-public sealed class Image2DViewer : Control
+public sealed class Image2DViewer : Control, IThemedControl
 {
     private RgbaImage? _image;
     private Bitmap? _bitmap;
@@ -27,7 +28,14 @@ public sealed class Image2DViewer : Control
     {
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint |
                  ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-        BackColor = Color.FromArgb(32, 32, 36);
+        BackColor = ThemeManager.Palette.Viewer;
+    }
+
+    /// <summary>The image canvas stays dark in both themes, which is what a media viewport wants.</summary>
+    public void ApplyTheme(ThemePalette palette)
+    {
+        BackColor = palette.Viewer;
+        Invalidate();
     }
 
     public float Zoom { get; private set; } = 1f;

@@ -1,3 +1,4 @@
+using Xt1.App.Theming;
 using Xt1.Core.Encoding;
 using Xt1.Core.Format;
 using Xt1.Core.Settings;
@@ -5,7 +6,7 @@ using Xt1.Core.Settings;
 namespace Xt1.App.Forms;
 
 /// <summary>Encoder preference, import defaults, preview defaults and optional tool paths.</summary>
-public sealed class SettingsDialog : Form
+public sealed class SettingsDialog : ThemedForm
 {
     private const int LabelColumn = 170;
 
@@ -246,14 +247,19 @@ public sealed class SettingsDialog : Form
     /// A full-width grey line. MaximumSize caps the width so a long status wraps instead of being
     /// clipped at the dialog edge.
     /// </summary>
-    private static Label MakeHint(string text) => new()
+    private static Label MakeHint(string text)
     {
-        Text = text,
-        AutoSize = true,
-        ForeColor = Color.FromArgb(112, 112, 124),
-        Margin = new Padding(0, 1, 0, 4),
-        MaximumSize = new Size(636, 0),
-    };
+        var label = new Label
+        {
+            Text = text,
+            AutoSize = true,
+            ForeColor = ThemeManager.Palette.MutedText,
+            Margin = new Padding(0, 1, 0, 4),
+            MaximumSize = new Size(636, 0),
+        };
+        ThemeManager.SetRole(label, ThemeRole.Muted);
+        return label;
+    }
 
     private static void AddControl(TableLayoutPanel grid, ref int row, Control control)
     {

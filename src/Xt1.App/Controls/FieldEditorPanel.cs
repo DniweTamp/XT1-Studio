@@ -1,4 +1,5 @@
 using System.Globalization;
+using Xt1.App.Theming;
 using Xt1.Core.Containers;
 using Xt1.Core.Editing;
 using Xt1.Core.Format;
@@ -12,8 +13,10 @@ namespace Xt1.App.Controls;
 /// Every change is applied immediately and reported as an undoable command; nothing is silently
 /// normalized, so reserved bytes and custom values survive.
 /// </summary>
-public sealed class FieldEditorPanel : UserControl
+public sealed class FieldEditorPanel : UserControl, IThemedControl
 {
+    private static ThemePalette Palette => ThemeManager.Palette;
+
     private readonly TableLayoutPanel _table;
     private readonly Label _hint;
     private readonly List<Action> _refreshers = new();
@@ -24,6 +27,8 @@ public sealed class FieldEditorPanel : UserControl
 
     public FieldEditorPanel()
     {
+        BackColor = Palette.Window;
+
         _table = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
@@ -39,9 +44,10 @@ public sealed class FieldEditorPanel : UserControl
             Dock = DockStyle.Top,
             AutoSize = false,
             Height = 24,
-            ForeColor = Color.DimGray,
+            ForeColor = Palette.MutedText,
             Text = "Select a texture to edit its fields.",
         };
+        ThemeManager.SetRole(_hint, ThemeRole.Muted);
 
         var host = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
         host.Controls.Add(_table);
@@ -78,6 +84,7 @@ public sealed class FieldEditorPanel : UserControl
         {
             _hint.Text = "Select a texture to edit its fields.";
             _table.ResumeLayout();
+            ThemeManager.ApplyTo(this);
             return;
         }
 
@@ -146,13 +153,24 @@ public sealed class FieldEditorPanel : UserControl
         var rawHint = new Label
         {
             AutoSize = true,
-            ForeColor = Color.DimGray,
+            ForeColor = Palette.MutedText,
             Margin = new Padding(3, 6, 3, 3),
             Text = "The format, texture type, dimensions, hash and table2 flags are edited in the panel above.",
         };
+        ThemeManager.SetRole(rawHint, ThemeRole.Muted);
         AddRow(string.Empty, rawHint);
 
         _table.ResumeLayout();
+        ThemeManager.ApplyTo(this);
+    }
+
+    /// <summary>Repaint the whole editor for the active theme; dynamic labels recompute their colour.</summary>
+    public void ApplyTheme(ThemePalette palette)
+    {
+        BackColor = palette.Window;
+        foreach (Control child in Controls) ThemeManager.ApplyTo(child);
+        _hint.ForeColor = palette.MutedText;
+        RefreshValues();
     }
 
     // --- row builders -------------------------------------------------------------------
@@ -298,7 +316,7 @@ public sealed class FieldEditorPanel : UserControl
 
     private void AddPayloadLengthWarning()
     {
-        var label = new Label { AutoSize = true, ForeColor = Color.DarkOrange, Margin = new Padding(3, 6, 3, 3) };
+        var label = new Label { AutoSize = true, ForeColor = Palette.WarnText, Margin = new Padding(3, 6, 3, 3) };
         void Refresh()
         {
             if (_texture is null) return;
@@ -307,7 +325,7 @@ public sealed class FieldEditorPanel : UserControl
             label.Text = expected == actual
                 ? $"payload {actual} bytes"
                 : $"payload {actual} bytes but imageSize is {expected}";
-            label.ForeColor = expected == actual ? Color.DimGray : Color.DarkOrange;
+            label.ForeColor = expected == actual ? Palette.MutedText : Palette.WarnText;
         }
         AddRow(string.Empty, label, Refresh);
     }
@@ -403,7 +421,8 @@ public sealed class FieldEditorPanel : UserControl
         var nameBox = new TextBox { Width = 170, Enabled = false, Margin = new Padding(3, 3, 6, 3) };
         var offsetBox = new TextBox { Width = 88, Enabled = false, Margin = new Padding(3, 3, 6, 3) };
         var sizeBox = new TextBox { Width = 88, Enabled = false, Margin = new Padding(3, 3, 0, 3) };
-        var detail = new Label { AutoSize = true, ForeColor = Color.DimGray, Margin = new Padding(6, 8, 0, 0) };
+        var detail = new Label { AutoSize = true, ForeColor = Palette.MutedText, Margin = new Padding(6, 8, 0, 0) };
+        ThemeManager.SetRole(detail, ThemeRole.Muted);
 
         editor.Controls.Add(new Label { Text = "tag", AutoSize = true, Margin = new Padding(0, 8, 0, 0) });
         editor.Controls.Add(tagBox);

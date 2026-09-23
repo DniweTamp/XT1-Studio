@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using Xt1.App.Theming;
 
 namespace Xt1.App.Controls;
 
@@ -30,6 +31,7 @@ public sealed class HexEditorControl : UserControl
         };
 
         _status = new Label { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft };
+        ThemeManager.SetRole(_status, ThemeRole.Muted);
         _apply = new Button { Text = "Apply", AutoSize = true };
         _revert = new Button { Text = "Revert", AutoSize = true };
         _apply.Click += (_, _) => Apply();

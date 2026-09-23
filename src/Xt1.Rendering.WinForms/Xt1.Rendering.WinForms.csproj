@@ -1,0 +1,46 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The WinForms renderer, compiled once as a library so both UIs can use the same OpenGL preview.
+    Xt1.App still compiles its own copy (it does not reference this project); the WPF pilot references
+    this one so its hosted WindowsFormsHost/GLControl behaves identically to the WinForms app.
+
+    This exists instead of <Compile Include="..\Xt1.App\..."> in the WPF project because a plain link
+    loses the WinForms sources' implicit `using System.Drawing;`/`System.Windows.Forms;`, while
+    re-enabling those usings in the WPF project collides with its WPF types (Application, Point,
+    KeyEventArgs, ...). Here the file list is compiled with ImplicitUsings on, so no source needs
+    editing and no generated copies are involved.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyName>Xt1.Rendering.WinForms</AssemblyName>
+    <RootNamespace>Xt1.Rendering.WinForms</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Same version Xt1.App uses, so the hosted GL control matches. -->
+    <PackageReference Include="OpenTK.GLControl" Version="4.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Xt1.Core\Xt1.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Renderer + theming sources reused verbatim from Xt1.App. -->
+    <Compile Include="..\Xt1.App\Rendering\GlPreviewControl.cs" Link="Rendering\GlPreviewControl.cs" />
+    <!-- ImageChannelMode (used by the GL control's Channel property) lives in Image2DViewer.cs. -->
+    <Compile Include="..\Xt1.App\Rendering\Image2DViewer.cs" Link="Rendering\Image2DViewer.cs" />
+    <Compile Include="..\Xt1.App\Theming\ThemePalette.cs" Link="Theming\ThemePalette.cs" />
+    <!-- ThemeManager.cs also declares IThemedControl; ThemedToolStripRenderer backs it. -->
+    <Compile Include="..\Xt1.App\Theming\ThemeManager.cs" Link="Theming\ThemeManager.cs" />
+    <Compile Include="..\Xt1.App\Theming\ThemedToolStripRenderer.cs" Link="Theming\ThemedToolStripRenderer.cs" />
+  </ItemGroup>
+
+</Project>
+

@@ -6,9 +6,21 @@ using Xt1.Core.Interop;
 
 namespace Xt1.Core.Settings;
 
+/// <summary>Which UI theme the app uses. <see cref="System"/> follows the OS light/dark preference.</summary>
+public enum AppTheme
+{
+    System,
+    Light,
+    Dark,
+}
+
 /// <summary>Application settings, persisted to <c>settings.json</c> next to the executable.</summary>
 public sealed class AppSettings
 {
+    /// <summary>UI theme choice. Defaults to following the OS until the user picks one explicitly.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public AppTheme Theme { get; set; } = AppTheme.System;
+
     /// <summary>NVTT is the default encoder; the managed encoder is the fallback when NVTT is absent.</summary>
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public EncoderBackend PreferredBackend { get; set; } = EncoderBackend.Nvtt;
@@ -20,8 +32,13 @@ public sealed class AppSettings
 
     public bool ApplySrgbPreview { get; set; } = true;
 
-    /// <summary>Preselect the "opaque alpha" viewer toggle (ignores the alpha channel on load).</summary>
-    public bool OpaqueAlphaByDefault { get; set; }
+    /// <summary>
+    /// Preselect the "opaque alpha" viewer toggle. On by default: most of the game's textures are
+    /// UNORM/BC payloads whose fourth channel carries no display information, and compositing those
+    /// over the checkerboard hides the RGB the user actually wants to inspect. Untick it (or use the
+    /// Alpha channel selector) to look at the stored alpha over the checkerboard instead.
+    /// </summary>
+    public bool OpaqueAlphaByDefault { get; set; } = true;
 
     /// <summary>Include the alpha-only option in the viewer's channel selector.</summary>
     public bool ShowAlphaChannel { get; set; } = true;

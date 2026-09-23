@@ -1,0 +1,127 @@
+<dialogs:ThemedDialog x:Class="Xt1.App.Wpf.Dialogs.BatchRecompressDialog"
+                      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                      xmlns:dialogs="clr-namespace:Xt1.App.Wpf.Dialogs"
+                      Title="Batch recompress (ASTC to BC)" Width="800" Height="660" MinWidth="700" MinHeight="540"
+                      Background="{DynamicResource Brush.Window}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" MaxHeight="340" Padding="18,16,18,6">
+            <StackPanel>
+                <TextBlock Style="{StaticResource SectionHeader}" Text="Source" />
+
+                <Grid Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="170" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource DialogLabel}" Text="Source"
+                               Margin="0,0,12,6" />
+                    <StackPanel Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,6">
+                        <RadioButton x:Name="CurrentRadio" Style="{StaticResource DialogRadio}" Content="Current document"
+                                     Click="OnSourceChanged" />
+                        <RadioButton x:Name="FolderRadio" Style="{StaticResource DialogRadio}" Content="Folder"
+                                     Margin="16,0,0,0" Click="OnSourceChanged" />
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource DialogLabel}" Text="Folder"
+                               Margin="0,0,12,6" />
+                    <TextBox x:Name="FolderBox" Grid.Row="1" Grid.Column="1" Style="{StaticResource FieldBox}"
+                             Margin="0,0,8,6" />
+                    <Button x:Name="BrowseButton" Grid.Row="1" Grid.Column="2" Style="{StaticResource PillButton}"
+                            Content="Browse..." Margin="0,0,0,6" Click="OnBrowseFolder" />
+
+                    <CheckBox x:Name="RecursiveCheck" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2"
+                              Style="{StaticResource PillCheckBox}" Content="Include subfolders (recursive)"
+                              Margin="0,0,0,10" />
+
+                    <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource DialogLabel}" Text="Target format"
+                               Margin="0,0,12,6" />
+                    <ComboBox x:Name="RuleCombo" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2"
+                              Style="{StaticResource PillComboBox}" HorizontalAlignment="Left" MinWidth="320"
+                              Margin="0,0,0,6" SelectionChanged="OnRuleChanged" />
+
+                    <CheckBox x:Name="DownscaleCheck" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2"
+                              Style="{StaticResource PillCheckBox}" Margin="0,0,0,4"
+                              Content="Downscale by half (drop base mip / resize single-mip images)"
+                              Click="OnDownscaleChanged" />
+                    <CheckBox x:Name="KeepNoMipsCheck" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2"
+                              Style="{StaticResource PillCheckBox}" Margin="0,0,0,4"
+                              Content="Do not downscale images without mipmaps" />
+                    <CheckBox x:Name="SyncFlagsCheck" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2"
+                              Style="{StaticResource PillCheckBox}" Margin="0,0,0,10"
+                              Content="Sync WTB sRGB / cubemap flags from the new format" />
+
+                    <TextBlock x:Name="OpaqueQualityLabel" Grid.Row="8" Grid.Column="0" Style="{StaticResource DialogLabel}"
+                               Text="Quality" Margin="0,0,12,6" />
+                    <ComboBox x:Name="OpaqueQualityCombo" Grid.Row="8" Grid.Column="1" Grid.ColumnSpan="2"
+                              Style="{StaticResource PillComboBox}" HorizontalAlignment="Left" MinWidth="180"
+                              Margin="0,0,0,6" />
+
+                    <TextBlock x:Name="AlphaQualityLabel" Grid.Row="9" Grid.Column="0" Style="{StaticResource DialogLabel}"
+                               Text="Alpha quality" Margin="0,0,12,6" />
+                    <ComboBox x:Name="AlphaQualityCombo" Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="2"
+                              Style="{StaticResource PillComboBox}" HorizontalAlignment="Left" MinWidth="180"
+                              Margin="0,0,0,6" />
+
+                    <TextBlock Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource DialogHint}"
+                               TextWrapping="Wrap"
+                               Text="Folder mode rewrites the originals in place; there is no backup." />
+                </Grid>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="1" Style="{StaticResource Card}" Margin="18,6,18,6">
+            <TextBox x:Name="LogBox" Style="{StaticResource FieldBox}" IsReadOnly="True" AcceptsReturn="True"
+                     FontFamily="Consolas" FontSize="12" TextWrapping="NoWrap" Margin="4"
+                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                     ToolTip="Progress log for the running batch" />
+        </Border>
+
+        <!-- Themed busy sweep: a clipped accent block, so no stock progress chrome appears in dark mode. -->
+        <Border x:Name="BusyBar" Grid.Row="2" Height="3" Margin="18,0,18,0" ClipToBounds="True"
+                Background="{DynamicResource Brush.Input}" Visibility="Collapsed">
+            <Rectangle x:Name="BusyBlock" Width="140" HorizontalAlignment="Left"
+                       Fill="{DynamicResource Brush.Accent}">
+                <Rectangle.RenderTransform>
+                    <TranslateTransform x:Name="BusyShift" X="-140" />
+                </Rectangle.RenderTransform>
+            </Rectangle>
+        </Border>
+
+        <Grid Grid.Row="3" Margin="18,8,18,14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="RunStatus" Grid.Column="0" VerticalAlignment="Center"
+                       Foreground="{DynamicResource Brush.Muted}" TextTrimming="CharacterEllipsis" />
+            <Button x:Name="RunButton" Grid.Column="1" Style="{StaticResource PillButton}" Content="Run" MinWidth="96"
+                    Click="OnRun" />
+            <Button Grid.Column="2" Style="{StaticResource PillButton}" Content="Close" MinWidth="96" Margin="8,0,0,0"
+                    IsCancel="True" Click="OnClose" />
+        </Grid>
+    </Grid>
+</dialogs:ThemedDialog>

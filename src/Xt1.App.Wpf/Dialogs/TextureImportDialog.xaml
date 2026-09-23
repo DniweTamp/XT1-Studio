@@ -1,0 +1,75 @@
+﻿<dialogs:ThemedDialog x:Class="Xt1.App.Wpf.Dialogs.TextureImportDialog"
+                      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                      xmlns:dialogs="clr-namespace:Xt1.App.Wpf.Dialogs"
+                      Title="Import texture" Width="620" Height="420" ResizeMode="NoResize"
+                      Background="{DynamicResource Brush.Window}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="18,18,18,0" VerticalAlignment="Top">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="150" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource DialogLabel}" Text="Source"
+                       Margin="0,0,12,8" />
+            <TextBlock x:Name="SourceText" Grid.Row="0" Grid.Column="1" TextWrapping="Wrap" Margin="0,0,0,8" />
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource DialogLabel}" Text="Decoded size"
+                       Margin="0,0,12,8" />
+            <TextBlock x:Name="SizeText" Grid.Row="1" Grid.Column="1" Margin="0,0,0,8" />
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource DialogLabel}" Text="Target format"
+                       Margin="0,0,12,8" />
+            <ComboBox x:Name="FormatCombo" Grid.Row="2" Grid.Column="1" Style="{StaticResource PillComboBox}"
+                      HorizontalAlignment="Left" MinWidth="260" Margin="0,0,0,8" />
+
+
+            <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource DialogLabel}" Text="Quality"
+                       Margin="0,0,12,8" />
+            <ComboBox x:Name="QualityCombo" Grid.Row="4" Grid.Column="1" Style="{StaticResource PillComboBox}"
+                      HorizontalAlignment="Left" MinWidth="180" Margin="0,0,0,8" />
+
+            <CheckBox x:Name="MipsCheck" Grid.Row="5" Grid.Column="1" Style="{StaticResource PillCheckBox}"
+                      Content="Generate full mip chain" HorizontalAlignment="Left" Margin="0,0,0,8" />
+
+            <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource DialogLabel}" Text="Transparent RGB"
+                       Margin="0,0,12,8" />
+            <CheckBox x:Name="SolidifyCheck" Grid.Row="6" Grid.Column="1" Style="{StaticResource PillCheckBox}"
+                      Content="Solidify (edge-pad transparent RGB from the nearest opaque colour)"
+                      HorizontalAlignment="Left" Margin="0,0,0,8"
+                      ToolTip="Fill the colour of fully transparent pixels from the nearest opaque pixels before encoding, so filtering and block compression do not leave a dark fringe. Alpha is kept." />
+
+            <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource DialogLabel}" Text="Alpha"
+                       Margin="0,0,12,0" />
+            <CheckBox x:Name="OpaqueCheck" Grid.Row="7" Grid.Column="1" Style="{StaticResource PillCheckBox}"
+                      Content="Force opaque (set alpha to 255)" HorizontalAlignment="Left"
+                      ToolTip="Replace the alpha channel with 255, making the imported texture fully opaque." />
+        </Grid>
+
+        <Border Grid.Row="1" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="18,10">
+            <StackPanel Style="{StaticResource DialogButtonRow}">
+                <Button Style="{StaticResource PillButton}" Content="Import" IsDefault="True" MinWidth="84"
+                        Click="OnImport" />
+                <Button Style="{StaticResource PillButton}" Content="Cancel" IsCancel="True" MinWidth="84"
+                        Margin="8,0,0,0" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</dialogs:ThemedDialog>
+

@@ -1,7 +1,9 @@
+using Xt1.App.Theming;
+
 namespace Xt1.App.Forms;
 
 /// <summary>Picks the container shape for a new empty bank: a `.wta`+`.wtp` pair or a single `.wtb`.</summary>
-public sealed class NewBankDialog : Form
+public sealed class NewBankDialog : ThemedForm
 {
     private readonly RadioButton _wta = new()
     {

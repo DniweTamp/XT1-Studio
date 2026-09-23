@@ -1,0 +1,81 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <!-- The 3D preview hosts the WinForms OpenGL control (GlPreviewControl) via WindowsFormsHost,
+         so the WinForms/WindowsFormsIntegration references must be present. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Xt1Studio.Wpf</AssemblyName>
+    <RootNamespace>Xt1.App.Wpf</RootNamespace>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ApplicationIcon>..\Xt1.App\Xt1Studio.ico</ApplicationIcon>
+    <!-- Where Xt1.Shell puts its win-x64 COM host; copied beside the app as a `shell` folder. -->
+    <ShellHostOutputDir>$(MSBuildThisFileDirectory)..\Xt1.Shell\bin\$(Configuration)\net8.0-windows\win-x64\</ShellHostOutputDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="..\Xt1.App\Xt1Studio.ico" Link="Xt1Studio.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Same version Xt1.App uses; the hosted WinForms GL control is built against it. -->
+    <PackageReference Include="OpenTK.GLControl" Version="4.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Xt1.Core\Xt1.Core.csproj" />
+    <!-- The WinForms OpenGL preview (GlPreviewControl) and its theming, compiled once as a library
+         and hosted here through WindowsFormsHost. -->
+    <ProjectReference Include="..\Xt1.Rendering.WinForms\Xt1.Rendering.WinForms.csproj" />
+    <!-- The shell thumbnail handler, referenced for its registration API so Settings can offer the
+         Explorer thumbnail registration. The COM host is copied out as a `shell` folder below. -->
+    <ProjectReference Include="..\Xt1.Shell\Xt1.Shell.csproj" />
+  </ItemGroup>
+
+  <!--
+    Enabling UseWindowsForms (needed for WindowsFormsHost) makes the Windows Desktop SDK inject
+    `global using System.Drawing;`/`System.Windows.Forms;`. Those globals collide head-on with the WPF
+    types this pilot uses (Application, Point, KeyEventArgs, MouseEventArgs, FontFamily, Cursor,
+    Clipboard, OpenFileDialog, ...), so they are removed here. The reused WinForms sources get their
+    own copy of those usings from Xt1.Rendering.WinForms, which sets ImplicitUsings for itself.
+  -->
+  <ItemGroup>
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
+  </ItemGroup>
+
+  <!-- Mirror Xt1.App: the COM host must be a real file beside its managed assembly for Explorer to
+       load it, so it lands in a `shell` folder next to the WPF exe as well. -->
+  <Target Name="CopyShellHostToBuildOutput" AfterTargets="Build"
+          Condition="Exists('$(ShellHostOutputDir)Xt1.Shell.comhost.dll')">
+    <ItemGroup>
+      <ShellHostBuildFile Include="$(ShellHostOutputDir)**\*" Exclude="$(ShellHostOutputDir)**\*.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ShellHostBuildFile)" DestinationFolder="$(OutDir)shell\%(RecursiveDir)"
+          SkipUnchangedFiles="true" ContinueOnError="WarnAndContinue" />
+    <!-- Explorer can hold the previous host open, in which case the copy above is skipped with a
+         warning and the output keeps a stale pair. Make that visible instead of silent. -->
+    <Warning Condition="Exists('$(OutDir)shell\Xt1.Shell.comhost.dll') And !Exists('$(OutDir)shell\Xt1.Shell.dll')"
+             Text="shell\ is missing Xt1.Shell.dll; close Explorer (it holds the thumbnail host) and rebuild." />
+  </Target>
+
+  <!-- A shipped build must contain the host: publishing is the point where a silent miss would turn
+       into a released binary whose Explorer registration cannot work, so it fails loudly instead. -->
+  <Target Name="CopyShellHostToPublishOutput" AfterTargets="Publish">
+    <Error Condition="!Exists('$(ShellHostOutputDir)Xt1.Shell.comhost.dll')"
+           Text="Xt1.Shell's COM host was not found at $(ShellHostOutputDir)Xt1.Shell.comhost.dll. Build the solution (which builds Xt1.Shell for $(Configuration)) before publishing, so shell\Xt1.Shell.comhost.dll ships with the app." />
+    <ItemGroup>
+      <ShellHostPublishFile Include="$(ShellHostOutputDir)**\*" Exclude="$(ShellHostOutputDir)**\*.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ShellHostPublishFile)" DestinationFolder="$(PublishDir)shell\%(RecursiveDir)"
+          SkipUnchangedFiles="true" />
+    <Error Condition="!Exists('$(PublishDir)shell\Xt1.Shell.comhost.dll')"
+           Text="Publishing did not produce $(PublishDir)shell\Xt1.Shell.comhost.dll; Explorer thumbnail registration would be unavailable in the published app." />
+  </Target>
+
+</Project>

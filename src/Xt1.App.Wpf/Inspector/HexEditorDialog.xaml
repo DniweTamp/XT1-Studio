@@ -1,0 +1,11 @@
+<dialogs:ThemedDialog x:Class="Xt1.App.Wpf.Inspector.HexEditorDialog"
+                      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                      xmlns:dialogs="clr-namespace:Xt1.App.Wpf.Dialogs"
+                      xmlns:inspector="clr-namespace:Xt1.App.Wpf.Inspector"
+                      Title="Raw bytes" Width="720" Height="560" MinWidth="480" MinHeight="360"
+                      Background="{DynamicResource Brush.Window}">
+    <Grid Margin="12">
+        <inspector:HexEditorView x:Name="HexView" />
+    </Grid>
+</dialogs:ThemedDialog>

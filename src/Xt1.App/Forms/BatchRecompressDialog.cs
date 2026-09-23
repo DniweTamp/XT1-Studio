@@ -1,3 +1,4 @@
+using Xt1.App.Theming;
 using Xt1.Core.Editing;
 using Xt1.Core.Encoding;
 
@@ -9,7 +10,7 @@ public sealed record RecompressRequest(RecompressOptions Options, bool CurrentDo
 /// Batch recompresses ASTC textures to BC, either in the currently loaded document or across every
 /// matching bank in a folder. Existing mips are recompressed; none are regenerated.
 /// </summary>
-public sealed class BatchRecompressDialog : Form
+public sealed class BatchRecompressDialog : ThemedForm
 {
     private readonly RadioButton _current = new() { Text = "Current document", AutoSize = true };
     private readonly RadioButton _folderMode = new() { Text = "Folder", AutoSize = true };
@@ -190,13 +191,15 @@ public sealed class BatchRecompressDialog : Form
     private static void AddHint(TableLayoutPanel table, ref int row, string text)
     {
         table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        table.Controls.Add(new Label
+        var label = new Label
         {
             Text = text,
             AutoSize = true,
-            ForeColor = Color.FromArgb(110, 110, 122),
+            ForeColor = ThemeManager.Palette.MutedText,
             Margin = new Padding(3, 2, 0, 6),
-        }, 1, row);
+        };
+        ThemeManager.SetRole(label, ThemeRole.Muted);
+        table.Controls.Add(label, 1, row);
         row++;
     }
 

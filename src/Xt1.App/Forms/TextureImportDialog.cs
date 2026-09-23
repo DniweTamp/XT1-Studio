@@ -1,3 +1,4 @@
+using Xt1.App.Theming;
 using Xt1.Core.Encoding;
 using Xt1.Core.Format;
 using Xt1.Core.Imaging;
@@ -5,7 +6,7 @@ using Xt1.Core.Imaging;
 namespace Xt1.App.Forms;
 
 /// <summary>Options for importing/replacing a texture from an image file.</summary>
-public sealed class TextureImportDialog : Form
+public sealed class TextureImportDialog : ThemedForm
 {
     private readonly ComboBox _format = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 260 };
     private readonly ComboBox _backend = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160 };
@@ -129,7 +130,17 @@ public sealed class TextureImportDialog : Form
     private static void Add(TableLayoutPanel table, ref int row, string label, Control control)
     {
         table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        table.Controls.Add(new Label { Text = label, AutoSize = true, Margin = new Padding(3, 8, 3, 3) }, 0, row);
+        var caption = new Label
+        {
+            Text = label,
+            Dock = DockStyle.Fill,
+            AutoSize = false,
+            TextAlign = ContentAlignment.MiddleLeft,
+            Margin = new Padding(0, 3, 10, 3),
+        };
+        control.Margin = new Padding(0, 3, 0, 3);
+        control.Anchor = AnchorStyles.Left;
+        table.Controls.Add(caption, 0, row);
         table.Controls.Add(control, 1, row);
         row++;
     }
