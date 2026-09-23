@@ -5,7 +5,7 @@ using Xt1.Core.Imaging;
 using Xt1.Core.Xt1;
 using Xt1.Core.Util;
 
-namespace Xt1.App;
+namespace Xt1.App.Wpf.Cli;
 
 /// <summary>
 /// <c>XT1 Studio.exe --export-decode &lt;file&gt; &lt;out.png|outDir&gt; [options]</c>: decode a texture and
@@ -294,3 +294,4 @@ internal static class DecodeExport
     private static int payloadLength(EditableTexture texture) => texture.Payload.Length;
 
 }
+

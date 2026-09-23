@@ -13,6 +13,15 @@ public partial class App : Application
         Settings = AppSettings.Load();
         // Insert the palette before the shell is constructed so the first frame is already themed.
         ThemeManager.Initialize(Settings.Theme);
+
+        // The diagnostics and shell-registration helpers run without opening the shell, mirroring the
+        // WinForms entry point's switch table.
+        if (Cli.HeadlessCli.IsHeadless(e.Args))
+        {
+            Shutdown(Cli.HeadlessCli.Run(e.Args, Console.WriteLine));
+            return;
+        }
+
         base.OnStartup(e);
 
         var window = new MainWindow();

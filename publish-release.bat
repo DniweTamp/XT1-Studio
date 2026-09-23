@@ -15,11 +15,17 @@ rem
 rem  Usage:
 rem    publish-release.bat                     publish normally
 rem    publish-release.bat /clean              delete the output folder first
+rem    publish-release.bat /bundle-nvtt        also ship nvtt30205.dll (~100 MB, NVIDIA's
+rem                                            binary) so BC6H encoding works without a
+rem                                            separate NVIDIA Texture Tools install
 rem    publish-release.bat /bundle-natives     also bundle native DLLs into the
 rem                                            single file (extracted to a temp
 rem                                            dir on first run, so startup is
 rem                                            slower - off by default)
 rem    publish-release.bat /nopause            do not wait for a keypress at the end
+rem
+rem  Symbols (.pdb) are stripped from the publish output by the project, so the folder ships
+rem  only the executable, the native glfw3.dll and the shell\ thumbnail host.
 rem
 rem  Switches can be combined, e.g.  publish-release.bat /clean /bundle-natives
 rem ============================================================================
@@ -27,19 +33,22 @@ rem ============================================================================
 setlocal EnableExtensions
 
 set "SCRIPT_DIR=%~dp0"
-set "PROJECT=%SCRIPT_DIR%src\Xt1.App\Xt1.App.csproj"
-set "OUTPUT=%SCRIPT_DIR%src\Xt1.App\bin\Release\net8.0-windows\publish\win-x64"
+set "PROJECT=%SCRIPT_DIR%src\Xt1.App.Wpf\Xt1.App.Wpf.csproj"
+set "OUTPUT=%SCRIPT_DIR%src\Xt1.App.Wpf\bin\Release\net8.0-windows\publish\win-x64"
 
 set "CLEAN=0"
+set "BUNDLE_NVTT=0"
 set "BUNDLE_NATIVE_LIBS=0"
 set "NOPAUSE=0"
 
 :parse
 if "%~1"=="" goto :parsed
 if /I "%~1"=="/clean"          set "CLEAN=1"
+if /I "%~1"=="/bundle-nvtt"     set "BUNDLE_NVTT=1"
 if /I "%~1"=="/bundle-natives" set "BUNDLE_NATIVE_LIBS=1"
 if /I "%~1"=="/nopause"        set "NOPAUSE=1"
 if /I "%~1"=="-clean"          set "CLEAN=1"
+if /I "%~1"=="-bundle-nvtt"     set "BUNDLE_NVTT=1"
 if /I "%~1"=="-bundle-natives" set "BUNDLE_NATIVE_LIBS=1"
 if /I "%~1"=="-nopause"        set "NOPAUSE=1"
 shift
@@ -70,6 +79,7 @@ set "ARGS=%ARGS% -p:PublishReadyToRun=false"
 set "ARGS=%ARGS% -p:PublishTrimmed=false"
 set "ARGS=%ARGS% -p:SatelliteResourceLanguages=en"
 if "%BUNDLE_NATIVE_LIBS%"=="1" set "ARGS=%ARGS% -p:IncludeNativeLibrariesForSelfExtract=true"
+if "%BUNDLE_NVTT%"=="1" set "ARGS=%ARGS% -p:BundleNvtt=true"
 
 echo ============================================================================
 echo  Publishing XT1 Studio (Release, single file, framework-dependent, win-x64)
@@ -123,3 +133,4 @@ exit /b 1
 if "%NOPAUSE%"=="0" pause
 endlocal
 exit /b 0
+

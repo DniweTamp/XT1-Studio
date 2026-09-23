@@ -30,8 +30,6 @@ public sealed class AppSettings
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public Xt1Format DefaultImportFormat { get; set; } = Xt1Format.Astc8x8Srgb;
 
-    public bool ApplySrgbPreview { get; set; } = true;
-
     /// <summary>
     /// Preselect the "opaque alpha" viewer toggle. On by default: most of the game's textures are
     /// UNORM/BC payloads whose fourth channel carries no display information, and compositing those

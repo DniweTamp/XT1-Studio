@@ -10,20 +10,20 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>Xt1Studio.Wpf</AssemblyName>
+    <AssemblyName>XT1 Studio</AssemblyName>
     <RootNamespace>Xt1.App.Wpf</RootNamespace>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
-    <ApplicationIcon>..\Xt1.App\Xt1Studio.ico</ApplicationIcon>
+    <ApplicationIcon>Xt1Studio.ico</ApplicationIcon>
     <!-- Where Xt1.Shell puts its win-x64 COM host; copied beside the app as a `shell` folder. -->
     <ShellHostOutputDir>$(MSBuildThisFileDirectory)..\Xt1.Shell\bin\$(Configuration)\net8.0-windows\win-x64\</ShellHostOutputDir>
   </PropertyGroup>
 
   <ItemGroup>
-    <Resource Include="..\Xt1.App\Xt1Studio.ico" Link="Xt1Studio.ico" />
+    <Resource Include="Xt1Studio.ico" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Same version Xt1.App uses; the hosted WinForms GL control is built against it. -->
+    <!-- Matches the version Xt1.Rendering.WinForms builds its GL control against. -->
     <PackageReference Include="OpenTK.GLControl" Version="4.0.2" />
   </ItemGroup>
 
@@ -47,10 +47,16 @@
   <ItemGroup>
     <Using Remove="System.Drawing" />
     <Using Remove="System.Windows.Forms" />
+    <!-- The Windows Desktop SDK's implicit set differs from the WinForms app's (which the headless
+         diagnostics came from): restore the namespaces those sources expect. -->
+    <Using Include="System.IO" />
+    <Using Include="System.Diagnostics" />
+    <Using Include="System.Globalization" />
   </ItemGroup>
 
-  <!-- Mirror Xt1.App: the COM host must be a real file beside its managed assembly for Explorer to
-       load it, so it lands in a `shell` folder next to the WPF exe as well. -->
+
+  <!-- The COM host must be a real file beside its managed assembly for Explorer to
+       load it, so it lands in a `shell` folder next to the app. -->
   <Target Name="CopyShellHostToBuildOutput" AfterTargets="Build"
           Condition="Exists('$(ShellHostOutputDir)Xt1.Shell.comhost.dll')">
     <ItemGroup>
@@ -62,6 +68,11 @@
          warning and the output keeps a stale pair. Make that visible instead of silent. -->
     <Warning Condition="Exists('$(OutDir)shell\Xt1.Shell.comhost.dll') And !Exists('$(OutDir)shell\Xt1.Shell.dll')"
              Text="shell\ is missing Xt1.Shell.dll; close Explorer (it holds the thumbnail host) and rebuild." />
+    <!-- Referencing Xt1.Shell (for ShellRegistration) also drops its own com host beside the exe.
+         Nothing loads that copy - registration points at shell\ - so the app folder keeps one copy
+         only. It is kept when shell\ could not be produced, which is what FindComHost falls back to. -->
+    <Delete Files="$(OutDir)Xt1.Shell.comhost.dll"
+            Condition="Exists('$(OutDir)shell\Xt1.Shell.comhost.dll')" />
   </Target>
 
   <!-- A shipped build must contain the host: publishing is the point where a silent miss would turn
@@ -76,6 +87,76 @@
           SkipUnchangedFiles="true" />
     <Error Condition="!Exists('$(PublishDir)shell\Xt1.Shell.comhost.dll')"
            Text="Publishing did not produce $(PublishDir)shell\Xt1.Shell.comhost.dll; Explorer thumbnail registration would be unavailable in the published app." />
+    <!-- One com host per shipped folder: the reference's copy at the root is never loaded. -->
+    <Delete Files="$(PublishDir)Xt1.Shell.comhost.dll" />
+  </Target>
+
+  <!--
+    NVIDIA Texture Tools is optional at runtime: the app discovers nvtt30205.dll (configured path,
+    app folder, NVIDIA install directories, PATH) and falls back to the built-in managed encoder,
+    which cannot encode BC6H. A release can bundle it with -p:BundleNvtt=true (publish-release.bat
+    /bundle-nvtt); it is off by default because it adds ~100 MB of NVIDIA's binaries.
+
+    The encoder plus the two DLLs it loads are copied: FreeImage.dll and the VC++ OpenMP runtime
+    vcomp140.dll. The installed directory also holds nvngx_dlisr.dll (54 MB, DLSS) and the CLI
+    tools, which are deliberately not shipped. One source directory is chosen (a vendored
+    third_party\nvtt copy first, then the 64-bit install, then a 32-bit one), so the same file name
+    can never be copied twice from different architectures.
+  -->
+  <Target Name="CopyNvttToPublishOutput" AfterTargets="Publish" Condition="'$(BundleNvtt)' == 'true'">
+    <PropertyGroup>
+      <NvttSourceDir Condition="Exists('$(MSBuildThisFileDirectory)..\..\third_party\nvtt\nvtt30205.dll')">$(MSBuildThisFileDirectory)..\..\third_party\nvtt</NvttSourceDir>
+      <NvttSourceDir Condition="'$(NvttSourceDir)' == '' And Exists('$(ProgramFiles)\NVIDIA Corporation\NVIDIA Texture Tools\nvtt30205.dll')">$(ProgramFiles)\NVIDIA Corporation\NVIDIA Texture Tools</NvttSourceDir>
+      <NvttSourceDir Condition="'$(NvttSourceDir)' == '' And '$(ProgramFiles(x86))' != '' And Exists('$(ProgramFiles(x86))\NVIDIA Corporation\NVIDIA Texture Tools\nvtt30205.dll')">$(ProgramFiles(x86))\NVIDIA Corporation\NVIDIA Texture Tools</NvttSourceDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <NvttFile Include="$(NvttSourceDir)\nvtt30205.dll" Condition="'$(NvttSourceDir)' != ''" />
+      <NvttFile Include="$(NvttSourceDir)\FreeImage.dll"
+                Condition="'$(NvttSourceDir)' != '' And Exists('$(NvttSourceDir)\FreeImage.dll')" />
+      <NvttFile Include="$(NvttSourceDir)\vcomp140.dll"
+                Condition="'$(NvttSourceDir)' != '' And Exists('$(NvttSourceDir)\vcomp140.dll')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(NvttFile)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true"
+          Condition="'@(NvttFile)' != ''" />
+    <!-- An explicitly requested bundle that cannot be produced must fail the release, not warn. -->
+    <Error Condition="!Exists('$(PublishDir)nvtt30205.dll')"
+           Text="BundleNvtt was requested but nvtt30205.dll could not be found (looked in third_party\nvtt and the NVIDIA Texture Tools install directories). Install NVIDIA Texture Tools 3.2.5, or drop nvtt30205.dll, FreeImage.dll and vcomp140.dll into third_party\nvtt." />
+    <!-- NVTT needs these to load; without them the app silently falls back (and BC6H is unavailable). -->
+    <Warning Condition="Exists('$(PublishDir)nvtt30205.dll') And (!Exists('$(PublishDir)FreeImage.dll') Or !Exists('$(PublishDir)vcomp140.dll'))"
+             Text="nvtt30205.dll was bundled without FreeImage.dll / vcomp140.dll, which NVTT needs in order to load. Add them beside the encoder in '$(NvttSourceDir)' and publish again, otherwise the published app falls back to the built-in encoder (no BC6H)." />
+  </Target>
+
+  <!--
+    Only an output folder this project owns is cleaned up: publishing with -o pointing at a shared or
+    parent directory must not delete files the app does not own. When the output is elsewhere the
+    symbol/NVTT cleanup is skipped deliberately (a stale NVTT copy then simply stays put).
+  -->
+  <PropertyGroup>
+    <OwnPublishRoot>$(MSBuildProjectDirectory)\bin\$(Configuration)\$(TargetFramework)\publish\</OwnPublishRoot>
+    <!-- Compared case-insensitively by lowering both sides: an enum argument is not accepted inside a
+         property function, and a false negative here only means the cleanup is skipped. -->
+    <PublishDirIsOwnOutput>$([System.String]::Copy('$(PublishDir)').ToLowerInvariant().StartsWith($([System.String]::Copy('$(OwnPublishRoot)').ToLowerInvariant())))</PublishDirIsOwnOutput>
+  </PropertyGroup>
+
+  <!-- Publishing without BundleNvtt into a folder that already had it would leave the encoder behind
+       and quietly turn a "small" publish into a bundled one. Remove them so each mode is exact. -->
+  <Target Name="RemoveNvttFromPublishOutput" AfterTargets="Publish"
+          Condition="'$(BundleNvtt)' != 'true' And '$(PublishDirIsOwnOutput)' == 'true'">
+    <ItemGroup>
+      <StaleNvttFile Include="$(PublishDir)nvtt30205.dll;$(PublishDir)FreeImage.dll;$(PublishDir)vcomp140.dll" />
+    </ItemGroup>
+    <Delete Files="@(StaleNvttFile)" />
+  </Target>
+
+  <!-- A published folder goes to users, so it carries no symbols: .pdb files are debug artefacts
+       (the shell host's are already excluded from the copy above; this covers the app's own and the
+       reference's). Runs for any configuration, so a Debug publish is clean too. -->
+  <Target Name="StripPublishSymbols" AfterTargets="Publish" Condition="'$(PublishDirIsOwnOutput)' == 'true'">
+    <ItemGroup>
+      <PublishSymbolFile Include="$(PublishDir)**\*.pdb" />
+    </ItemGroup>
+    <Delete Files="@(PublishSymbolFile)" />
   </Target>
 
 </Project>
+

@@ -1,6 +1,6 @@
-using System.Drawing;
+﻿using System.Drawing;
 
-namespace Xt1.App.Theming;
+namespace Xt1.Rendering.WinForms.Theming;
 
 /// <summary>
 /// Flat, palette-driven renderer for menu, toolbar, context-menu and status strips. The stock
@@ -99,3 +99,4 @@ internal sealed class ThemedColorTable : ProfessionalColorTable
     public override Color RaftingContainerGradientBegin => _p.Control;
     public override Color RaftingContainerGradientEnd => _p.Control;
 }
+

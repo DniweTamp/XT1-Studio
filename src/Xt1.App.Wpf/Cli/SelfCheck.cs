@@ -8,9 +8,9 @@ using Xt1.Core.Interop;
 using Xt1.Core.Nvtt;
 using Xt1.Core.Settings;
 using Xt1.Core.Xt1;
-using Xt1.App.Services;
 
-namespace Xt1.App;
+
+namespace Xt1.App.Wpf.Cli;
 
 /// <summary>
 /// Headless diagnostic used by <c>XT1 Studio.exe --selfcheck</c>. Exercises the same services the
@@ -44,12 +44,23 @@ internal static class SelfCheck
         NvttNative? nvtt = null;
         try
         {
-            Check("nvtt load", () =>
+            // NVTT is optional at runtime: a machine without it still passes, because the built-in
+            // encoder takes over (minus BC6H encoding). A DLL that was *found* but will not load is a
+            // broken install rather than an absent one, so that stays a failure - otherwise the gate
+            // would report success for a release whose NVTT (and BC6H) does not actually work.
+            nvtt = NvttNative.TryCreate(out var nvttError, tools.NvttDll);
+            if (nvtt is null && tools.NvttDll is not null)
             {
-                nvtt = NvttNative.TryCreate(out var error, tools.NvttDll);
-                if (nvtt is null) throw new InvalidOperationException(error);
-                return $"version {nvtt.Version}";
-            });
+                Check("nvtt load", () => throw new InvalidOperationException(nvttError));
+            }
+            else if (nvtt is null)
+            {
+                log("  [--] nvtt load: n/a (not found; the built-in encoder is used)");
+            }
+            else
+            {
+                log($"  [ok] nvtt load: version {nvtt.Version}");
+            }
 
             var managed = new ManagedEncoder();
             NvttEncoder? nvttEncoder = nvtt is null ? null : new NvttEncoder(nvtt);
@@ -307,3 +318,4 @@ internal static class SelfCheck
         return failures == 0 ? 0 : 1;
     }
 }
+

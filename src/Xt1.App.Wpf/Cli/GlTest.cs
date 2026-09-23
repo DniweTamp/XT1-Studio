@@ -1,11 +1,13 @@
+﻿using System.Drawing;
 using System.Drawing.Imaging;
-using Xt1.App.Rendering;
+using System.Windows.Forms;
+using Xt1.Rendering.WinForms.Rendering;
 using Xt1.Core.Codecs;
 using Xt1.Core.Containers;
 using Xt1.Core.Imaging;
 using Xt1.Core.Xt1;
 
-namespace Xt1.App;
+namespace Xt1.App.Wpf.Cli;
 
 /// <summary>
 /// <c>XT1 Studio.exe --gltest &lt;file&gt; [options]</c>: assemble a 3D texture in the real OpenGL
@@ -555,3 +557,5 @@ internal static class GlTest
     };
 
 }
+
+

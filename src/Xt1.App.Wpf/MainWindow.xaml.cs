@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -12,7 +12,7 @@ using Xt1.App.Wpf.Dialogs;
 using Xt1.App.Wpf.Inspector;
 using Xt1.App.Wpf.Preview;
 using Xt1.App.Wpf.Theming;
-using Xt1.App.Rendering;
+using Xt1.Rendering.WinForms.Rendering;
 using Xt1.Core.Codecs;
 using Xt1.Core.Containers;
 using Xt1.Core.Editing;
@@ -23,7 +23,7 @@ using Xt1.Core.Nvtt;
 using Xt1.Core.Settings;
 using Xt1.Core.Util;
 using Xt1.Core.Xt1;
-using VolumeRenderMode = Xt1.App.Rendering.VolumeRenderMode;
+using VolumeRenderMode = Xt1.Rendering.WinForms.Rendering.VolumeRenderMode;
 
 namespace Xt1.App.Wpf;
 
@@ -417,7 +417,7 @@ public partial class MainWindow : Window
 
     private void OnMenuSettings(object sender, RoutedEventArgs e)
     {
-        var dialog = new SettingsDialog(App.Settings) { Owner = this };
+        var dialog = new SettingsDialog(App.Settings, _encoderDescription) { Owner = this };
         if (dialog.ShowDialog() != true) return;
 
         var result = dialog.Result;
@@ -439,7 +439,7 @@ public partial class MainWindow : Window
         // The native tool paths may have changed, so the encoder set is rebuilt from the new settings.
         RebuildEncoders();
 
-        StatusLeft.Text = "Settings saved.";
+        StatusLeft.Text = $"Settings saved. Encoder: {_encoderDescription}.";
     }
 
     /// <summary>
@@ -1007,18 +1007,27 @@ public partial class MainWindow : Window
     private void OnFileColumnHeaderClick(object sender, RoutedEventArgs e)
     {
         if (e.OriginalSource is not GridViewColumnHeader header) return;
+        SortByColumn(header.Column);
+    }
 
-        string column = header.Column == FileColumnModified ? "modified"
-            : header.Column == FileColumnSize ? "size"
+    /// <summary>
+    /// Sort by a column, reversing when it is already the sort column, and refresh the list without
+    /// re-enumerating the folder. The header click and the test hooks both come through here, so the
+    /// mapping from a column to its sort key has a single implementation.
+    /// </summary>
+    private void SortByColumn(GridViewColumn? column)
+    {
+        string key = column == FileColumnModified ? "modified"
+            : column == FileColumnSize ? "size"
             : "name";
 
-        if (string.Equals(_fileSortColumn, column, StringComparison.Ordinal))
+        if (string.Equals(_fileSortColumn, key, StringComparison.Ordinal))
         {
             _fileSortAscending = !_fileSortAscending;
         }
         else
         {
-            _fileSortColumn = column;
+            _fileSortColumn = key;
             _fileSortAscending = true;
         }
 
@@ -1198,15 +1207,29 @@ public partial class MainWindow : Window
         return (null, null);
     }
 
+    /// <summary>
+    /// The bank an action applies to: the selected bank node, or the first bank when nothing (or the
+    /// document root) is selected — a brand-new empty bank has no texture node to select, but must
+    /// still be fillable. Both the menu's enabled state and the actions themselves use this, so an
+    /// offered item always works.
+    /// </summary>
+    private BankSection? TargetBank() =>
+        SelectedTreeTarget().Section ?? _document?.Sections.FirstOrDefault();
+
     private void OnTreePreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (FindAncestor<TreeViewItem>(e.OriginalSource as DependencyObject) is { } item)
             item.IsSelected = true;
     }
 
-    private void OnTreeMenuOpened(object sender, RoutedEventArgs e)
+    private void OnTreeMenuOpened(object sender, RoutedEventArgs e) => UpdateTreeMenuState();
+
+    /// <summary>Enable the tree menu entries for the current selection (also used by the test hooks).</summary>
+    private void UpdateTreeMenuState()
     {
-        var (texture, section) = SelectedTreeTarget();
+        var (texture, _) = SelectedTreeTarget();
+        var section = TargetBank();
+
         bool hasTexture = texture is not null;
         var info = texture?.FormatInfo;
         bool canDecode = TextureCodec.CanDecode(info);
@@ -1498,7 +1521,7 @@ public partial class MainWindow : Window
     /// <summary>Add a new texture to the selected bank, from an image file or a DDS.</summary>
     private void OnTreeAddTexture(object sender, RoutedEventArgs e)
     {
-        var (_, section) = SelectedTreeTarget();
+        var section = TargetBank();
         if (section is null)
         {
             StatusLeft.Text = "Select a bank (not a texture) to add into it.";
@@ -1605,7 +1628,7 @@ public partial class MainWindow : Window
 
     private async void OnTreeExportBank(object sender, RoutedEventArgs e)
     {
-        var (_, section) = SelectedTreeTarget();
+        var section = TargetBank();
         if (section is null) return;
         if (section.Bank.Count == 0)
         {
@@ -2268,6 +2291,7 @@ public partial class MainWindow : Window
         return null;
     }
 }
+
 
 
 

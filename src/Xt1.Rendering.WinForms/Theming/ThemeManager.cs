@@ -4,20 +4,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using Xt1.Core.Settings;
 
-namespace Xt1.App.Theming;
-
-/// <summary>Semantic colour a control wants, independent of the active theme.</summary>
-public enum ThemeRole
-{
-    /// <summary>Default role for the control's type.</summary>
-    None,
-
-    /// <summary>De-emphasised text.</summary>
-    Muted,
-
-    /// <summary>Title / heading text.</summary>
-    Heading,
-}
+namespace Xt1.Rendering.WinForms.Theming;
 
 /// <summary>
 /// A control that themes its own subtree. The generic pass calls <see cref="ApplyTheme"/> and does not
@@ -36,30 +23,16 @@ public interface IThemedControl
 /// </summary>
 public static class ThemeManager
 {
-    private static readonly ConditionalWeakTable<Control, RoleBox> Roles = new();
     private static readonly ConditionalWeakTable<Control, object> WindowThemeHooked = new();
     private static readonly ConditionalWeakTable<Control, object> TitleBarHooked = new();
 
-    private sealed class RoleBox
-    {
-        public ThemeRole Role;
-    }
+
 
     public static AppTheme Preference { get; private set; } = AppTheme.System;
 
     public static bool IsDark { get; private set; }
 
     public static ThemePalette Palette { get; private set; } = ThemePalette.Light;
-
-    /// <summary>Raised after a theme change has been applied to every open form.</summary>
-    public static event Action? Changed;
-
-    /// <summary>Record which semantic colour a control uses; read by the generic theming pass.</summary>
-    public static void SetRole(Control control, ThemeRole role)
-    {
-        if (Roles.TryGetValue(control, out var box)) box.Role = role;
-        else Roles.Add(control, new RoleBox { Role = role });
-    }
 
     /// <summary>Resolve and store the theme choice, then repaint every open form.</summary>
     public static void Initialize(AppTheme preference)
@@ -68,14 +41,6 @@ public static class ThemeManager
         IsDark = Resolve(preference);
         Palette = IsDark ? ThemePalette.Dark : ThemePalette.Light;
         ApplyToOpenForms();
-    }
-
-    /// <summary>Change the theme at runtime (as the View menu does) and repaint open forms.</summary>
-    public static void SetPreference(AppTheme preference)
-    {
-        if (Preference == preference) return;
-        Initialize(preference);
-        Changed?.Invoke();
     }
 
     /// <summary>The OS light/dark preference, or light when it cannot be read.</summary>
@@ -147,7 +112,7 @@ public static class ThemeManager
 
             case TextBoxBase text:
                 text.BackColor = RoleBack(control, Palette.Input);
-                text.ForeColor = RoleFore(control);
+                text.ForeColor = Palette.Text;
                 break;
 
             case NumericUpDown numeric:
@@ -163,13 +128,13 @@ public static class ThemeManager
 
             case CheckBox check:
                 check.FlatStyle = FlatStyle.Flat;
-                check.ForeColor = RoleFore(control);
+                check.ForeColor = Palette.Text;
                 check.BackColor = Color.Transparent;
                 break;
 
             case RadioButton radio:
                 radio.FlatStyle = FlatStyle.Flat;
-                radio.ForeColor = RoleFore(control);
+                radio.ForeColor = Palette.Text;
                 radio.BackColor = Color.Transparent;
                 break;
 
@@ -201,7 +166,7 @@ public static class ThemeManager
                 break;
 
             case Label or LinkLabel:
-                control.ForeColor = RoleFore(control);
+                control.ForeColor = Palette.Text;
                 control.BackColor = Color.Transparent;
                 break;
 
@@ -260,21 +225,10 @@ public static class ThemeManager
         }
     }
 
-    private static Color RoleFore(Control control)
-    {
-        return Role(control) switch
-        {
-            ThemeRole.Muted => Palette.MutedText,
-            ThemeRole.Heading => Palette.HeadingText,
-            _ => Palette.Text,
-        };
-    }
 
     private static Color RoleBack(Control control, Color fallback) =>
         control.BackColor == Color.Transparent ? Color.Transparent : fallback;
 
-    private static ThemeRole Role(Control control) =>
-        Roles.TryGetValue(control, out var box) ? box.Role : ThemeRole.None;
 
     // --- native theming -----------------------------------------------------------------
 
@@ -330,3 +284,4 @@ public static class ThemeManager
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hWnd, int attribute, ref int value, int size);
 }
+

@@ -1,9 +1,9 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
-using Xt1.App.Rendering;
+using Xt1.Rendering.WinForms.Rendering;
 using Xt1.Core.Codecs;
 using Xt1.Core.Containers;
 using Xt1.Core.Imaging;
@@ -15,7 +15,7 @@ namespace Xt1.App.Wpf.Preview;
 /// <summary>
 /// Hosts the WinForms <see cref="GlPreviewControl"/> in the WPF tree through a
 /// <see cref="System.Windows.Forms.Integration.WindowsFormsHost"/>. The renderer itself is the
-/// shared Xt1.App source compiled into this assembly unchanged, so the orbit camera, ray-marching
+/// shared renderer source compiled into Xt1.Rendering.WinForms, so the orbit camera, ray-marching
 /// and shaders behave exactly as they do in the WinForms shell.
 /// <para>
 /// GL is best-effort: construction and every property push are guarded, and a failed context
@@ -230,8 +230,8 @@ public sealed partial class GlVolumeView : UserControl
     {
         try
         {
-            Xt1.App.Theming.ThemeManager.Initialize(App.Settings.Theme);
-            _control?.ApplyTheme(Xt1.App.Theming.ThemeManager.Palette);
+            Xt1.Rendering.WinForms.Theming.ThemeManager.Initialize(App.Settings.Theme);
+            _control?.ApplyTheme(Xt1.Rendering.WinForms.Theming.ThemeManager.Palette);
 
             if (_control is not null && Application.Current?.TryFindResource("Brush.Viewer") is SolidColorBrush brush)
             {
@@ -349,7 +349,7 @@ public sealed partial class GlVolumeView : UserControl
         {
             try
             {
-                _control?.ApplyTheme(Xt1.App.Theming.ThemeManager.Palette);
+                _control?.ApplyTheme(Xt1.Rendering.WinForms.Theming.ThemeManager.Palette);
             }
             catch
             {
@@ -402,4 +402,5 @@ public sealed partial class GlVolumeView : UserControl
 
 
 }
+
 

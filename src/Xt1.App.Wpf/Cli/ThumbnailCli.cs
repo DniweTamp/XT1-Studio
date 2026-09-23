@@ -1,8 +1,8 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Xt1.Core.Containers;
 using Xt1.Core.Imaging;
 
-namespace Xt1.App;
+namespace Xt1.App.Wpf.Cli;
 
 /// <summary>
 /// <c>XT1 Studio.exe --thumbnail &lt;file.xt1&gt; &lt;out.png&gt; [--size N] [--mip M] [--face F] [--slice S]</c>:
@@ -93,3 +93,4 @@ internal static class ThumbnailCli
         return 0;
     }
 }
+

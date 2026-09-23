@@ -1,10 +1,10 @@
-using Xt1.Core.Codecs;
+﻿using Xt1.Core.Codecs;
 using Xt1.Core.Containers;
 
-namespace Xt1.App;
+namespace Xt1.App.Wpf.Cli;
 
 /// <summary>
-/// <c>XT1 Studio.exe --dump-tree &lt;file|folder&gt;</c>: prints the container → sub-file → texture
+/// <c>XT1 Studio.exe --dump-tree &lt;file|folder&gt;</c>: prints the container â†’ sub-file â†’ texture
 /// hierarchy the UI tree shows, and decodes every supported base mip to prove the payload lines
 /// up. Given a folder it scans every bank file and reports an aggregate.
 /// </summary>
@@ -269,3 +269,4 @@ internal static class TreeDump
         }
     }
 }
+

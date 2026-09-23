@@ -315,7 +315,7 @@
 
             <!-- Right: inspector -->
             <ScrollViewer Grid.Column="4" VerticalScrollBarVisibility="Auto">
-                <StackPanel>
+                <StackPanel x:Name="InspectorRoot">
                     <StackPanel Orientation="Horizontal" Margin="2,2,2,0">
                         <Border Width="42" Height="42" CornerRadius="11" Background="{DynamicResource Brush.Control}"
                                 BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1" VerticalAlignment="Top">
@@ -465,4 +465,6 @@
         </Border>
     </Grid>
 </Window>
+
+
 

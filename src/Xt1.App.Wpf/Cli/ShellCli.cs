@@ -1,6 +1,6 @@
-using Xt1.Shell;
+﻿using Xt1.Shell;
 
-namespace Xt1.App;
+namespace Xt1.App.Wpf.Cli;
 
 /// <summary>
 /// <c>XT1 Studio.exe --register-shell [--machine] [--shell-path &lt;...comhost.dll&gt;]</c> and
@@ -54,3 +54,4 @@ internal static class ShellCli
         }
     }
 }
+

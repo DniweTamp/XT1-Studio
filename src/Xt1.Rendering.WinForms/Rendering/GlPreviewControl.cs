@@ -1,12 +1,12 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using OpenTK.GLControl;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.Common;
-using Xt1.App.Theming;
+using Xt1.Rendering.WinForms.Theming;
 using Xt1.Core.Imaging;
 using Xt1.Core.Rendering;
 
-namespace Xt1.App.Rendering;
+namespace Xt1.Rendering.WinForms.Rendering;
 
 public enum PreviewMode
 {
@@ -965,3 +965,4 @@ void main()
     FragColor = vec4(0.62, 0.62, 0.70, 0.45);
 }";
 }
+

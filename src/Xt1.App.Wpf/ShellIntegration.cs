@@ -20,7 +20,7 @@ internal static class ShellIntegration
         var comHost = ComHost(explicitPath);
         if (comHost is null)
             throw new InvalidOperationException(
-                "The shell host was not found: expected shell\\Xt1.Shell.comhost.dll beside Xt1Studio.Wpf.exe. " +
+                "The shell host was not found: expected shell\\Xt1.Shell.comhost.dll beside XT1 Studio.exe. " +
                 "Use a published build (publish-release.bat) or rebuild the app.");
 
         try
@@ -46,7 +46,7 @@ internal static class ShellIntegration
                   "refresh files it has already listed.";
 
         if (comHost is null)
-            return "Shell host missing: expected shell\\Xt1.Shell.comhost.dll beside Xt1Studio.Wpf.exe " +
+            return "Shell host missing: expected shell\\Xt1.Shell.comhost.dll beside XT1 Studio.exe " +
                    "(publish or rebuild the app to include it).";
 
         return "Not registered: Explorer shows the generic icon for loose .xt1 files. " +

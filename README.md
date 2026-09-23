@@ -11,14 +11,14 @@ cases.
 
 - Windows x64
 - .NET 8 SDK (developed against the .NET 9 SDK building `net8.0` / `net8.0-windows`)
-- Optional native dependencies, auto-detected, all overridable in **Tools → Settings**:
-  - NVIDIA Texture Tools 3.2.5: `nvtt30205.dll` / `nvtt_export.exe`
+- Optional native dependencies, auto-detected and overridable in **Tools → Settings**:
+  - NVIDIA Texture Tools 3.2.5: `nvtt30205.dll`
     (default `C:\Program Files\NVIDIA Corporation\NVIDIA Texture Tools`)
 
 ```powershell
 dotnet build Xt1Tool.sln
 dotnet test  tests\Xt1.Core.Tests\Xt1.Core.Tests.csproj
-dotnet run   --project src\Xt1.App\Xt1.App.csproj
+dotnet run   --project src\Xt1.App.Wpf\Xt1.App.Wpf.csproj
 ```
 
 The tool is portable: `settings.json` (backend, defaults, tool paths, last opened folder) lives in the
@@ -29,7 +29,7 @@ migrated on first launch.
 
 `publish-release.bat` reproduces the Visual Studio `FolderProfile` (Release, `net8.0-windows`,
 framework-dependent, `win-x64`, single file, ReadyToRun off) and writes to
-`src\Xt1.App\bin\Release\net8.0-windows\publish\win-x64\`:
+`src\Xt1.App.Wpf\bin\Release\net8.0-windows\publish\win-x64\`:
 
 ```powershell
 .\publish-release.bat                     # profile settings; runs a self-check on the result
@@ -39,23 +39,28 @@ framework-dependent, `win-x64`, single file, ReadyToRun off) and writes to
 ```
 
 All managed assemblies are bundled into `XT1 Studio.exe`. In the default (profile) mode the native
-`glfw3.dll` (OpenGL windowing) sits next to it, plus `.pdb` symbols; `/bundle-natives` folds the
-natives in too so the folder contains only the executable.
+`glfw3.dll` (OpenGL windowing) sits next to it and the Explorer thumbnail host lives in `shell\`;
+symbols are stripped from the publish, so nothing else is shipped. `/bundle-natives` folds the
+natives into the executable too, leaving only the exe and `shell\`.
 Framework-dependent output requires the .NET 8 Desktop Runtime on the target machine.
+NVTT is not bundled by default: the app looks for `nvtt30205.dll` at the path set in
+**Tools → Settings**, then beside the exe, in the NVIDIA install directories, then on PATH, and
+falls back to the built-in encoder (which cannot encode BC6H). `/bundle-nvtt` copies it into the publish output — from `third_party\nvtt\` if you keep a
+copy there, otherwise from the installed NVIDIA Texture Tools — which adds ~100 MB.
 
 ### Headless self-check
 
 ```powershell
 .\publish-release.bat /nopause     # runs it automatically after publishing
-& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --selfcheck
-& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --dump-tree D:\Bayonetta3\romfs\ui\ui_core.dat
-& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --uitest D:\Bayonetta3\romfs\em\em0000.dat
-& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --export-decode <file> <out.png> --index 3 --slice 8
-& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --export-decode <file> x --hash 0x482960F9 --scan-layouts
-& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --thumbnail <file.xt1> <out.png> --size 256
-& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --register-shell     # .xt1 thumbnails in Explorer
-& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --gltest D:\Bayonetta3\romfs\core\core.dat --out $env:TEMP\gl
-& "src\Xt1.App\bin\Debug\net8.0-windows\XT1 Studio.exe" --panelshot D:\Bayonetta3\romfs\core\core.dat $env:TEMP\panel.png --tree
+& "src\Xt1.App.Wpf\bin\Debug\net8.0-windows\XT1 Studio.exe" --selfcheck
+& "src\Xt1.App.Wpf\bin\Debug\net8.0-windows\XT1 Studio.exe" --dump-tree D:\Bayonetta3\romfs\ui\ui_core.dat
+& "src\Xt1.App.Wpf\bin\Debug\net8.0-windows\XT1 Studio.exe" --uitest D:\Bayonetta3\romfs\em\em0000.dat
+& "src\Xt1.App.Wpf\bin\Debug\net8.0-windows\XT1 Studio.exe" --export-decode <file> <out.png> --index 3 --slice 8
+& "src\Xt1.App.Wpf\bin\Debug\net8.0-windows\XT1 Studio.exe" --export-decode <file> x --hash 0x482960F9 --scan-layouts
+& "src\Xt1.App.Wpf\bin\Debug\net8.0-windows\XT1 Studio.exe" --thumbnail <file.xt1> <out.png> --size 256
+& "src\Xt1.App.Wpf\bin\Debug\net8.0-windows\XT1 Studio.exe" --register-shell     # .xt1 thumbnails in Explorer
+& "src\Xt1.App.Wpf\bin\Debug\net8.0-windows\XT1 Studio.exe" --gltest D:\Bayonetta3\romfs\core\core.dat --out $env:TEMP\gl
+& "src\Xt1.App.Wpf\bin\Debug\net8.0-windows\XT1 Studio.exe" --panelshot D:\Bayonetta3\romfs\core\core.dat $env:TEMP\panel.png --tree
 ```
 
 `--export-decode` writes a decode as PNG so a layout can be inspected by eye (`--mip`, `--slice`,
@@ -176,15 +181,16 @@ These were re-derived from `D:\Bayonetta3\romfs` and are locked by tests:
 ## Layout
 
 ```
-src/Xt1.Core   net8.0, no UI: containers, XT1 model, swizzle, layout, codecs, NVTT interop, writers, editing
-src/Xt1.App    net8.0-windows: WinForms shell, GDI+ 2D viewer, OpenGL cubemap/volume viewport, dialogs
-src/Xt1.Shell  net8.0-windows: the .xt1 Explorer thumbnail handler (IThumbnailProvider + COM host)
-tests/Xt1.Core.Tests  453 tests, real-file validation against D:\Bayonetta3\romfs when present
+src/Xt1.Core              net8.0, no UI: containers, XT1 model, swizzle, layout, codecs, NVTT interop, writers, editing
+src/Xt1.App.Wpf           net8.0-windows: WPF shell (XAML, themed), hosted OpenGL cubemap/volume viewport, all dialogs
+src/Xt1.Rendering.WinForms net8.0-windows: the OpenGL renderer + theme palette the WPF viewport hosts (retired WinForms shell)
+src/Xt1.Shell             net8.0-windows: the .xt1 Explorer thumbnail handler (IThumbnailProvider + COM host)
+tests/Xt1.Core.Tests      468 tests, real-file validation against D:\Bayonetta3\romfs when present
 ```
 
 `Xt1.Core` is headless and fully testable; the app only consumes it. The window and executable icon is
-`src/Xt1.App/Xt1Studio.ico`, embedded both as the Win32 `ApplicationIcon` and as an assembly resource
-(`AppIcon.Shared`) so forms and the published single-file exe show it without a loose file.
+`src/Xt1.App.Wpf/Xt1Studio.ico`, embedded both as the Win32 `ApplicationIcon` and as a WPF `Resource`
+(the window icon) so the published single-file exe shows it without a loose file.
 
 ## Features
 
@@ -260,7 +266,7 @@ tests/Xt1.Core.Tests  453 tests, real-file validation against D:\Bayonetta3\romf
   submenu (`.png` / `.dds` / `.xt1`), add texture from image or DDS, delete texture, copy hash, and
   the bank-level PNG export. Items are enabled per selection: DDS export only for formats that can be
   written (including ASTC), bank actions only when a bank is loaded, and so on.
-- 2D viewer: pan/zoom, mip selection, R/G/B/A isolation, alpha checkerboard, optional gamma. For a 3D
+- 2D viewer: pan/zoom, mip selection, R/G/B/A isolation, alpha checkerboard. For a 3D
   texture it shows the currently selected slice (with pan/zoom preserved while scrubbing), so one
   slice can be inspected while the GL tab shows the whole volume.
 - GL viewport:
@@ -272,7 +278,8 @@ tests/Xt1.Core.Tests  453 tests, real-file validation against D:\Bayonetta3\romf
     `Rx(pitch)*Ry(yaw)` form it needs to swing an object upright.) A drag that reaches the viewport
     edge is wrapped back to the middle so a long turn does not stall; wheel changes the field of
     view; double-click or Home resets. The shared channel selector isolates R/G/B/A here too, and explicit
-    **Gamma** / **Exposure** controls sit at the right of the slice bar.
+    **Gamma** / **Exposure** controls appear in the preview bar; because they drive the sky render they
+    are shown for cubemaps only (a volume shows slice/render/slice-plane controls instead).
   - **3D texture**: the whole volume assembled into one ray-marched object. The camera orbits it —
     the target stays at the origin for every angle, drag swings the object round, wheel dollies in
     and out, double-click resets. A faint bounding box is drawn so the object reads even where it is
@@ -281,7 +288,7 @@ tests/Xt1.Core.Tests  453 tests, real-file validation against D:\Bayonetta3\romf
     opacity comes from the RGB luminance or from the stored alpha; `MIP` is a maximum-intensity
     projection. Blended opacity is normalized by the ray's path through the box, so a flat volume
     (256x256x16 crosses only a sliver of its box) is as visible as a cubic one. The toolbar
-    `Opaque a` toggle and the render-mode combo are two views of the same "ignore alpha" choice, so
+    `Opaque Preview` toggle and the render-mode combo are two views of the same "ignore alpha" choice, so
     the button applies in 3D too; a volume whose alpha is uniform defaults to `RGB`, because alpha
     carries no density there.
   - **Channel isolation** (`R`/`G`/`B`/`A`) applies to the cubemap, the volume and its slices, not
@@ -343,7 +350,8 @@ sRGB, and the real table comes from `XT1_FORMAT.md`.
   the 3D viewport, but re-encoding a volume is rejected rather than approximated.
 - BC6H encoding is NVTT-only: the managed path reports it as unsupported instead of writing the
   wrong blocks, so without NVTT it is refused rather than silently mis-encoded. Only the tool paths
-  NVTT actually consumes are configurable (`nvtt30205.dll`, `nvtt_export.exe`).
+  NVTT actually consumes is configurable (`nvtt30205.dll`, in **Tools → Settings**; leave it blank to
+  auto-detect).
 - Alpha / binary-alpha and the `0x2C` textureFlag semantics are still unknown; they are exposed as
   free-form editable fields and preserved verbatim rather than interpreted.
 - No known unexplained layout mismatches remain: the former wide-pitch (multi-mip ASTC) and

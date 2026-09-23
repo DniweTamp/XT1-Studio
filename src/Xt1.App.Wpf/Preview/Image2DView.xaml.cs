@@ -1,15 +1,15 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using Xt1.App.Rendering;
+using Xt1.Rendering.WinForms.Rendering;
 using Xt1.Core.Imaging;
 
 namespace Xt1.App.Wpf.Preview;
 
 /// <summary>
-/// Pan/zoom RGBA preview surface, a WPF port of <c>Xt1.App.Rendering.Image2DViewer</c>.
+/// Pan/zoom RGBA preview surface; the WinForms viewer it replaces is gone, this is the only one.
 /// Owns its pixels (one reused BGRA buffer) and nothing else: the host supplies the viewer
 /// background and the empty-state overlay.
 /// </summary>
@@ -390,4 +390,5 @@ public sealed partial class Image2DView : UserControl
         Cursor = Cursors.Arrow;
     }
 }
+
 

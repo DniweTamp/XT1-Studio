@@ -1,6 +1,6 @@
-using System.Drawing;
+﻿using System.Drawing;
 
-namespace Xt1.App.Theming;
+namespace Xt1.Rendering.WinForms.Theming;
 
 /// <summary>
 /// The complete set of colours the UI is painted with, for one theme. Controls never hardcode a
@@ -109,3 +109,4 @@ public sealed class ThemePalette
         PendingBack = Color.FromArgb(42, 45, 52),
     };
 }
+

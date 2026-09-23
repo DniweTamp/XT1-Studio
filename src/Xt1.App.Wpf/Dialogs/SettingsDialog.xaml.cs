@@ -1,6 +1,8 @@
-﻿using System.Globalization;
+using System.IO;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using Microsoft.Win32;
 using Xt1.Core.Encoding;
 using Xt1.Core.Format;
 using Xt1.Core.Interop;
@@ -25,17 +27,18 @@ public partial class SettingsDialog : ThemedDialog
     /// <summary>A copy of the settings passed in, updated in place when the user accepts.</summary>
     public AppSettings Result { get; }
 
-    public SettingsDialog(AppSettings current)
+    public SettingsDialog(AppSettings current, string encoderDescription)
     {
         Result = CopyOf(current);
         InitializeComponent();
 
-        // The encoder is not a choice: report which one the app resolved. nvtt30205.dll is looked up
-        // beside the executable; the built-in encoder takes over when it is not deployed.
-        var nvttDll = ToolLocator.Find(ToolLocator.NvttDllFileName);
-        EncoderText.Text = nvttDll is not null
-            ? "NVTT (nvtt30205.dll)"
-            : "Built-in encoder (nvtt30205.dll not found)";
+        // The Encoder line is the shell's own verdict, so it reflects what the app actually loads
+        // rather than whether a file happens to exist. The hint below only reports which path was
+        // found: NVTT is optional, an explicit path wins, and a path that does not exist falls back to
+        // the app folder, the NVIDIA install directories, then PATH.
+        EncoderText.Text = encoderDescription;
+        NvttDllBox.Text = Result.NvttDllPath ?? string.Empty;
+        UpdateNvttHint();
 
         _formats = FormatTable.All
             .Where(f => f.Codec is CodecKind.Bc or CodecKind.Astc or CodecKind.Raw)
@@ -57,6 +60,44 @@ public partial class SettingsDialog : ThemedDialog
     }
 
     /// <summary>Reflect the current registration state in the button label, enabled state and status.</summary>
+    /// <summary>
+    /// Say which path was found for the box's current content. Deliberately worded as presence ("used
+    /// if it loads"), because only the shell can say whether the library loads — the Encoder line
+    /// above carries that verdict.
+    /// </summary>
+    private void UpdateNvttHint()
+    {
+        var typed = NullIfEmpty(NvttDllBox.Text);
+        bool typedExists = typed is not null && File.Exists(typed);
+        var resolved = ToolLocator.Find(ToolLocator.NvttDllFileName, typed);
+
+        EncoderHint.Text = typed is not null
+            ? typedExists
+                ? $"Using {resolved}. OK applies it; NVTT is used if it loads, otherwise the built-in encoder."
+                : resolved is not null
+                    ? $"Not found at {typed}; auto-detection is used instead ({resolved})."
+                    : $"Not found at {typed}, and auto-detection found nothing; the built-in encoder is used."
+            : resolved is not null
+                ? $"Auto-detected {resolved}. NVTT is used if it loads, otherwise the built-in encoder."
+                : "Not found automatically: the built-in encoder is used, which cannot encode BC6H.";
+    }
+
+    private void OnNvttDllChanged(object sender, TextChangedEventArgs e) => UpdateNvttHint();
+
+    private void OnBrowseNvtt(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Choose nvtt30205.dll",
+            Filter = "NVTT library (nvtt30205.dll)|nvtt30205.dll|DLL (*.dll)|*.dll|All files (*.*)|*.*",
+            FileName = NvttDllBox.Text,
+        };
+        if (dialog.ShowDialog(this) == true) NvttDllBox.Text = dialog.FileName;
+    }
+
+    private static string? NullIfEmpty(string? text) =>
+        string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
     private void RefreshShell()
     {
         bool machine = ShellMachineCheck.IsChecked == true;
@@ -131,6 +172,7 @@ public partial class SettingsDialog : ThemedDialog
 
         if (FormatCombo.SelectedIndex >= 0 && FormatCombo.SelectedIndex < _formats.Count)
             Result.DefaultImportFormat = _formats[FormatCombo.SelectedIndex].Format;
+        Result.NvttDllPath = NullIfEmpty(NvttDllBox.Text);
         Result.SyncFlagsFromFormat = SyncCheck.IsChecked == true;
         Result.OpaqueAlphaByDefault = OpaqueAlphaCheck.IsChecked == true;
         Result.ShowAlphaChannel = ShowAlphaCheck.IsChecked == true;
