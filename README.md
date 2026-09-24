@@ -82,6 +82,39 @@ for scripting. Banks (`.dat`/`.wta`/`.wtb` and their `.dtt`/`.wtp` payloads) are
 many textures, so "the" thumbnail is ambiguous — export the texture as `.xt1` first (the texture menu's
 Export → `.xt1`).
 
+### Headless file operations
+
+`--file <op>` is the command-line form of the shell's file menu, so a whole edit-and-save pass can run
+without a window. `--help` prints the command list.
+
+```powershell
+& ".\XT1 Studio.exe" --help
+& ".\XT1 Studio.exe" --file new out\empty.wtb --kind wtb
+& ".\XT1 Studio.exe" --file export bank.dat out\ --as png           # every texture, to PNG
+& ".\XT1 Studio.exe" --file export bank.dat tex.dds --as dds --index 3
+& ".\XT1 Studio.exe" --file import bank.dat replacement.png --index 3 --format BC7_UNORM
+& ".\XT1 Studio.exe" --file add bank.dat icon.png --bank 0 --name ui_icon
+& ".\XT1 Studio.exe" --file delete bank.dat --hash 0x482960F9
+& ".\XT1 Studio.exe" --file replace-raw bank.dat payload.bin --index 3 --force
+& ".\XT1 Studio.exe" --file recompress bank.dat --rule bc1-bc3 --quality highest
+```
+
+Every op drives the same `BankDocument` / `TextureOperations` / `BankWriter` services the UI uses and
+so behaves the same as the corresponding menu item. Operations that mutate a bank write it straight
+away; `--dry-run` prints exactly what would be written (for `export` too) without touching disk, and
+`--out DIR` / `--base NAME` redirect the output. `new` refuses to overwrite an existing bank unless
+`--force` is given. Selectors (`--bank N`, `--index N`, `--hash 0xH`) pick the target
+and must resolve to exactly one texture for `import`/`delete`/`replace-raw`; `export` with no selector
+exports everything (a loose `.xt1` behaves like a one-texture bank). Image imports re-encode through
+the shared encoder and default to the texture's current format, or `--format 0xNN|name` (an unknown
+value is a usage error), with
+`--backend managed|nvtt|cli`, `--quality`, `--mips`/`--no-mips`, `--solidify` and `--opaque`; a `.dds`
+input is imported losslessly. `replace-raw` detects an `XT1\0` record and replaces header+payload
+verbatim, otherwise it replaces the bare payload (a size mismatch needs `--force`). `recompress`
+converts ASTC textures to BC in place, the same as the batch tool (single-mip inputs are kept unless
+`--downscale-without-mips`). Exit codes: 0 success, 1 an operation failed, 2 bad usage or no unique
+match.
+
 ### Explorer thumbnails
 
 ```powershell
