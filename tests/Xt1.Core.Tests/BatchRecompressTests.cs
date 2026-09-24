@@ -4,6 +4,7 @@ using Xt1.Core.Editing;
 using Xt1.Core.Encoding;
 using Xt1.Core.Format;
 using Xt1.Core.Imaging;
+using Xt1.Core.Nvtt;
 using Xt1.Core.Xt1;
 using Xunit;
 
@@ -17,35 +18,161 @@ public class BatchRecompressTests
 {
     private static EncoderPicker ManagedOnly() => new(null, null);
 
-    private static RecompressOptions Options(RecompressFormatRule rule = RecompressFormatRule.Bc1OrBc3,
-        bool downscale = false, bool skipNoMips = true) =>
-        new(rule, downscale, skipNoMips, EncoderBackend.Managed, EncodeQuality.Fastest,
-            EncodeQuality.Fastest, SyncFlags: true);
+    private static RecompressTarget Target(string label) =>
+        RecompressTargets.All.First(t => t.Label == label);
+
+    private static RecompressOptions Options(bool downscale = false, bool skipNoMips = true,
+        string opaque = "BC1", string alpha = "BC3") =>
+        new(Target(opaque), Target(alpha), downscale, skipNoMips, EncoderBackend.Managed,
+            EncodeQuality.Fastest, EncodeQuality.Fastest, SyncFlags: true);
 
     [Theory]
-    [InlineData(RecompressFormatRule.Bc1OrBc3, false, EncodeQuality.Fastest)]
-    [InlineData(RecompressFormatRule.Bc1OrBc3, true, EncodeQuality.Highest)]
-    [InlineData(RecompressFormatRule.Bc1OrBc7, false, EncodeQuality.Fastest)]
-    [InlineData(RecompressFormatRule.Bc1OrBc7, true, EncodeQuality.Highest)]
-    [InlineData(RecompressFormatRule.AlwaysBc1, true, EncodeQuality.Fastest)]
-    [InlineData(RecompressFormatRule.AlwaysBc7, true, EncodeQuality.Fastest)]
-    public void QualityFor_SeparatesMixedOpaqueAndAlphaModes(
-        RecompressFormatRule rule, bool hasAlpha, EncodeQuality expected)
+    [InlineData(false, EncodeQuality.Fastest)]
+    [InlineData(true, EncodeQuality.Highest)]
+    public void QualityFor_UsesAlphaQualityOnlyWhenTheTextureHasAlpha(bool hasAlpha, EncodeQuality expected)
     {
-        var options = new RecompressOptions(rule, false, true, EncoderBackend.Nvtt,
+        var options = new RecompressOptions(Target("BC1"), Target("BC7"), false, true, EncoderBackend.Nvtt,
             EncodeQuality.Fastest, EncodeQuality.Highest, true);
 
         Assert.Equal(expected, options.QualityFor(hasAlpha));
     }
 
+    /// <summary>The pickers offer every encodable family, not just BC1/BC3/BC7.</summary>
+    [Fact]
+    public void RecompressTargets_CoverEveryEncodableFamily()
+    {
+        var labels = RecompressTargets.All.Select(t => t.Label).ToList();
+
+        Assert.Contains("BC1", labels);
+        Assert.Contains("BC4", labels);
+        Assert.Contains("BC6H", labels);
+        Assert.Contains("BC7", labels);
+        Assert.Contains("RGBA8", labels);
+        Assert.Contains("ASTC 8x8", labels);
+        Assert.Contains(RecompressTargets.All, t => t.Unorm.Codec == CodecKind.Astc);
+        Assert.Contains(RecompressTargets.All, t => t.Unorm.Codec == CodecKind.Raw);
+
+        // The unconfirmed 0x6D and the alias ids are never offered, and every label is unique.
+        Assert.DoesNotContain(RecompressTargets.All, t => t.Unorm.Format == Xt1Format.Unknown6d);
+        Assert.DoesNotContain(RecompressTargets.All, t => t.Unorm.IsAlias || t.Srgb?.IsAlias == true);
+        Assert.Equal(labels.Count, labels.Distinct().Count());
+    }
+
     [Theory]
-    [InlineData(RecompressFormatRule.Bc1OrBc3, true)]
-    [InlineData(RecompressFormatRule.Bc1OrBc7, true)]
-    [InlineData(RecompressFormatRule.AlwaysBc1, false)]
-    [InlineData(RecompressFormatRule.AlwaysBc7, false)]
-    public void UsesSeparateAlphaQuality_IsTheCanonicalRuleClassification(
-        RecompressFormatRule rule, bool expected) =>
-        Assert.Equal(expected, RecompressOptions.UsesSeparateAlphaQuality(rule));
+    [InlineData("BC1", true)]
+    [InlineData("BC1", false)]
+    [InlineData("BC7", true)]
+    [InlineData("RGBA8", true)]
+    [InlineData("ASTC 8x8", true)]
+    [InlineData("ASTC 8x8", false)]
+    public void Resolve_FollowsTheSourceColourSpace_WhenTheFamilyHasBothVariants(string label, bool srgb)
+    {
+        var resolved = Target(label).Resolve(srgb);
+
+        Assert.Equal(srgb, resolved.IsSrgb);
+    }
+
+    [Theory]
+    [InlineData("BC4")]
+    [InlineData("BC5")]
+    [InlineData("BC6H")]
+    [InlineData("BGRA8")]
+    [InlineData("AF_L8")]
+    public void Resolve_KeepsTheOnlyVariant_WhenTheFamilyHasNoSrgbPair(string label)
+    {
+        var target = Target(label);
+
+        Assert.Null(target.Srgb);
+        Assert.Same(target.Unorm, target.Resolve(true));
+        Assert.False(target.Resolve(true).IsSrgb);
+    }
+
+    /// <summary>Every target must be encodable by NVTT or the managed encoder, in both colour spaces.</summary>
+    [Fact]
+    public void EveryTarget_ResolvesToAFormatSomeEncoderCanHandle()
+    {
+        foreach (var target in RecompressTargets.All)
+            foreach (bool srgb in new[] { false, true })
+            {
+                var format = target.Resolve(srgb);
+                bool encodable = NvttFormatMap.InProcessSupports(format.Format)
+                    || ManagedFormatMap.SupportsEncode(format);
+                Assert.True(encodable, $"{target.Label} ({(srgb ? "sRGB" : "UNORM")}) has no encoder");
+            }
+    }
+
+    /// <summary>An opaque texture takes the opaque target, a transparent one the alpha target.</summary>
+    [Fact]
+    public void Convert_RoutesOpaqueAndAlphaTexturesToTheirOwnTargets()
+    {
+        var opaque = BuildAstc(Xt1Format.Astc8x8Unorm, withAlpha: false);
+        var alpha = BuildAstc(Xt1Format.Astc8x8Unorm, withAlpha: true);
+        Assert.False(TextureCodec.Decode(opaque, 0, 0, 0, out _)!.HasTransparency(), "opaque source decoded with alpha");
+        Assert.True(TextureCodec.Decode(alpha, 0, 0, 0, out _)!.HasTransparency(), "alpha source decoded opaque");
+
+        // Deliberately the reverse of the old BC1/BC3 rule, so a hard-coded pair would fail.
+        var options = Options(opaque: "BC7", alpha: "BC3");
+        var recompressor = new BatchRecompressor(ManagedOnly());
+
+        Assert.True(recompressor.Convert(opaque, options, new SyncProgress()));
+        Assert.True(recompressor.Convert(alpha, options, new SyncProgress()));
+
+        Assert.Equal(Xt1Format.Bc7Unorm, opaque.Header.Format);
+        Assert.Equal(Xt1Format.Bc3Unorm, alpha.Header.Format);
+    }
+
+    /// <summary>The concrete format written is the target family's sRGB or UNORM member, per the source.</summary>
+    [Theory]
+    [InlineData(Xt1Format.Astc8x8Unorm, "BC1", Xt1Format.Bc1Unorm)]
+    [InlineData(Xt1Format.Astc8x8Srgb, "BC1", Xt1Format.Bc1Srgb)]
+    [InlineData(Xt1Format.Astc8x8Srgb, "BC7", Xt1Format.Bc7Srgb)]
+    [InlineData(Xt1Format.Astc8x8Unorm, "BC4", Xt1Format.Bc4Unorm)]
+    [InlineData(Xt1Format.Astc8x8Srgb, "BC4", Xt1Format.Bc4Unorm)]
+    [InlineData(Xt1Format.Astc8x8Unorm, "RGBA8", Xt1Format.Rgba8Unorm)]
+    [InlineData(Xt1Format.Astc8x8Srgb, "RGBA8", Xt1Format.Rgba8Srgb)]
+    [InlineData(Xt1Format.Astc8x8Unorm, "ASTC 6x6", Xt1Format.Astc6x6Unorm)]
+    [InlineData(Xt1Format.Astc8x8Srgb, "ASTC 6x6", Xt1Format.Astc6x6Srgb)]
+    public void Convert_ResolvesTheTargetsColourSpaceFromTheSource(
+        Xt1Format sourceFormat, string target, Xt1Format expected)
+    {
+        var texture = BuildAstc(sourceFormat, withAlpha: false);
+        var recompressor = new BatchRecompressor(ManagedOnly());
+
+        Assert.True(recompressor.Convert(texture, Options(opaque: target), new SyncProgress()));
+
+        Assert.Equal(expected, texture.Header.Format);
+    }
+
+    /// <summary>A target no available encoder supports is refused and the texture is left untouched.</summary>
+    [Fact]
+    public void Convert_LeavesTheTextureUntouched_WhenNoEncoderSupportsTheTarget()
+    {
+        var texture = BuildAstc(Xt1Format.Astc8x8Unorm, withAlpha: false);
+        var recompressor = new BatchRecompressor(ManagedOnly());
+
+        // The managed encoder cannot encode BC6H, and no NVTT instance is supplied here.
+        Assert.False(recompressor.Convert(texture, Options(opaque: "BC6H"), new SyncProgress()));
+
+        Assert.Equal(Xt1Format.Astc8x8Unorm, texture.Header.Format);
+        Assert.Equal(CodecKind.Astc, texture.FormatInfo!.Codec);
+    }
+
+    /// <summary>Build a one-mip ASTC texture of the given colour space, opaque or with a transparent half.</summary>
+    private static EditableTexture BuildAstc(Xt1Format astcFormat, bool withAlpha, int size = 64)
+    {
+        var format = FormatTable.Get(astcFormat)!;
+        var image = new RgbaImage(size, size);
+        for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+                image.SetPixel(x, y, (byte)(x * 4), (byte)(y * 4), (byte)((x + y) * 2),
+                    (byte)(withAlpha && x < size / 2 ? 0 : 255));
+
+        var texture = EditableTexture.CreateNew(format.Format, (uint)size, (uint)size);
+        var built = TextureOperations.Replace2D(texture, image, new ManagedEncoder(), true,
+            EncodeQuality.Fastest);
+        Assert.True(built.Success, built.Error);
+        return texture;
+    }
 
     private static string NewTempDirectory()
     {

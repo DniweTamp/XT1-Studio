@@ -418,11 +418,26 @@ internal static class FileCli
     {
         if (positional.Count < 1) { Usage(log); return 2; }
 
-        var rule = ParseRule(CliOptions.Get(options, "--rule"));
-        if (rule is null)
+        var formats = ParseFormats(CliOptions.Get(options, "--rule"));
+        if (formats is null)
         {
             log($"[error] unknown --rule '{CliOptions.Get(options, "--rule")}' (bc1, bc1-bc3, bc1-bc7, bc7)");
             return 2;
+        }
+        var (opaqueFormat, alphaFormat) = formats.Value;
+
+        // --opaque-format / --alpha-format override either half of the rule with any encodable target.
+        if (CliOptions.Get(options, "--opaque-format") is { } opaqueName)
+        {
+            var parsed = ParseTarget(opaqueName, "--opaque-format", log);
+            if (parsed is null) return 2;
+            opaqueFormat = parsed;
+        }
+        if (CliOptions.Get(options, "--alpha-format") is { } alphaName)
+        {
+            var parsed = ParseTarget(alphaName, "--alpha-format", log);
+            if (parsed is null) return 2;
+            alphaFormat = parsed;
         }
 
         // One --base for several inputs would resolve every bank to the same output pair, so all but
@@ -446,7 +461,8 @@ internal static class FileCli
 
         var settings = App.Settings;
         var request = new RecompressOptions(
-            rule.Value,
+            opaqueFormat,
+            alphaFormat,
             Has(options, "--downscale"),
             // The shell's batch dialog leaves "keep single-mip textures" checked, so the CLI default
             // is to hold them back too; --downscale-without-mips is the explicit opt-out.
@@ -686,14 +702,52 @@ internal static class FileCli
             _ => settings.PreferredBackend,
         };
 
-    private static RecompressFormatRule? ParseRule(string? text) => (text ?? "bc1-bc3").ToLowerInvariant() switch
+    /// <summary>The classic rule shorthands, as an (opaque, alpha) target pair.</summary>
+    private static (RecompressTarget Opaque, RecompressTarget Alpha)? ParseFormats(string? text)
     {
-        "bc1" or "always-bc1" => RecompressFormatRule.AlwaysBc1,
-        "bc1-bc3" or "bc1orbc3" => RecompressFormatRule.Bc1OrBc3,
-        "bc1-bc7" or "bc1orbc7" => RecompressFormatRule.Bc1OrBc7,
-        "bc7" or "always-bc7" => RecompressFormatRule.AlwaysBc7,
-        _ => null,
-    };
+        var (opaque, alpha) = (text ?? "bc1-bc3").ToLowerInvariant() switch
+        {
+            "bc1" or "always-bc1" => ("BC1", "BC1"),
+            "bc1-bc3" or "bc1orbc3" => ("BC1", "BC3"),
+            "bc1-bc7" or "bc1orbc7" => ("BC1", "BC7"),
+            "bc7" or "always-bc7" => ("BC7", "BC7"),
+            _ => (string.Empty, string.Empty),
+        };
+        return opaque.Length == 0 ? null : (Target(opaque), Target(alpha));
+    }
+
+    /// <summary>
+    /// Resolve a recompress target from a picker label ("bc7", "astc 8x8") or a format family's base
+    /// name/id (e.g. "BC1_UNORM" or 0x42), sharing <see cref="ResolveFormat"/>'s id and name parsing so
+    /// both accept the same syntax. The sRGB/UNORM variant follows the source, so a colour-space-
+    /// qualified name is rejected rather than silently accepted and ignored.
+    /// </summary>
+    private static RecompressTarget? ParseTarget(string text, string option, Action<string> log)
+    {
+        var wanted = Normalize(text);
+        var byLabel = RecompressTargets.All.FirstOrDefault(t => Normalize(t.Label) == wanted);
+        if (byLabel is not null) return byLabel;
+
+        var format = ResolveFormat(text, _ => { });
+        if (format is null)
+        {
+            log($"[error] unknown {option} '{text}'");
+            return null;
+        }
+
+        var target = RecompressTargets.All.FirstOrDefault(t => t.Unorm.Format == format.Format);
+        if (target is not null) return target;
+
+        log($"[error] {option} '{text}' names a specific colour space; the sRGB/UNORM variant follows " +
+            "each source texture, so use the format family instead (e.g. bc1, bc7, astc 8x8)");
+        return null;
+    }
+
+    private static RecompressTarget Target(string label) =>
+        RecompressTargets.All.First(t => t.Label == label);
+
+    private static string Normalize(string text) =>
+        string.Concat(text.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant));
 
     private static int Unknown(string op, Action<string> log)
     {
@@ -712,7 +766,7 @@ internal static class FileCli
         log("  add <path> <image|file.dds> [--bank N]       add a texture to a bank");
         log("  delete <path>                                delete one texture");
         log("  replace-raw <path> <file|payload> [--force]  replace from an .xt1 or raw payload");
-        log("  recompress <path>...                         recompress ASTC textures to BC");
+        log("  recompress <path>...                         recompress ASTC textures to a chosen format");
         log("");
         log("selectors: --bank N  --index N  --hash 0xH");
         log("export:    --mip M  --face F  --slice S");
@@ -720,6 +774,7 @@ internal static class FileCli
         log("            --quality fastest|normal|production|highest  --mips|--no-mips");
         log("            --solidify  --opaque  --name NAME");
         log("recompress: --rule bc1|bc1-bc3|bc1-bc7|bc7  --quality Q  --alpha-quality Q");
+        log("            --opaque-format NAME  --alpha-format NAME  (bc7, astc 8x8; colour space follows source)");
         log("            --downscale  --downscale-without-mips  --no-sync-flags");
         log("writing:   --out DIR  --base NAME  --no-recompute  --no-payload-side  --dry-run");
     }

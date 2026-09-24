@@ -30,16 +30,13 @@ public partial class BatchRecompressDialog : ThemedDialog
         _runner = runner;
         InitializeComponent();
 
-        // Bind the enum values themselves rather than relying on item order matching the enum, so
-        // reordering RecompressFormatRule can never silently select the wrong BC target.
-        RuleCombo.ItemsSource = new[]
-        {
-            new RuleOption(RecompressFormatRule.AlwaysBc1, "Always BC1"),
-            new RuleOption(RecompressFormatRule.Bc1OrBc3, "BC1 when opaque, BC3 when it has alpha"),
-            new RuleOption(RecompressFormatRule.Bc1OrBc7, "BC1 when opaque, BC7 when it has alpha"),
-            new RuleOption(RecompressFormatRule.AlwaysBc7, "Always BC7"),
-        };
-        RuleCombo.SelectedIndex = 1;
+        // Select the target instance by label rather than by index, so the list order can change
+        // without silently picking a different format. A target then resolves its sRGB/UNORM
+        // variant from each source texture.
+        OpaqueFormatCombo.ItemsSource = RecompressTargets.All;
+        AlphaFormatCombo.ItemsSource = RecompressTargets.All;
+        OpaqueFormatCombo.SelectedItem = Target("BC1");
+        AlphaFormatCombo.SelectedItem = Target("BC7");
 
         var qualities = new[]
         {
@@ -58,12 +55,15 @@ public partial class BatchRecompressDialog : ThemedDialog
         SyncFlagsCheck.IsChecked = true;
 
         UpdateSourceControls();
-        UpdateQualityControls();
     }
+
+    private static RecompressTarget Target(string label) =>
+        RecompressTargets.All.First(t => t.Label == label);
 
     /// <summary>Resolved options from the current control state (exposed for tests/automation).</summary>
     public RecompressOptions Options => new(
-        (RuleCombo.SelectedItem as RuleOption)?.Rule ?? RecompressFormatRule.Bc1OrBc3,
+        (OpaqueFormatCombo.SelectedItem as RecompressTarget) ?? Target("BC1"),
+        (AlphaFormatCombo.SelectedItem as RecompressTarget) ?? Target("BC7"),
         DownscaleCheck.IsChecked == true,
         KeepNoMipsCheck.IsChecked == true,
         // NVTT when available; EncoderPicker substitutes the built-in managed encoder otherwise.
@@ -78,8 +78,6 @@ public partial class BatchRecompressDialog : ThemedDialog
         // "Do not downscale without mipmaps" only means anything while downscaling.
         KeepNoMipsCheck.IsEnabled = DownscaleCheck.IsChecked == true;
 
-    private void OnRuleChanged(object sender, SelectionChangedEventArgs e) => UpdateQualityControls();
-
     private void UpdateSourceControls()
     {
         bool folder = FolderRadio.IsChecked == true;
@@ -87,15 +85,6 @@ public partial class BatchRecompressDialog : ThemedDialog
         BrowseButton.IsEnabled = folder;
         RecursiveCheck.IsEnabled = folder;
         KeepNoMipsCheck.IsEnabled = DownscaleCheck.IsChecked == true;
-    }
-
-    private void UpdateQualityControls()
-    {
-        var rule = (RuleCombo.SelectedItem as RuleOption)?.Rule ?? RecompressFormatRule.Bc1OrBc3;
-        bool mixed = RecompressOptions.UsesSeparateAlphaQuality(rule);
-        OpaqueQualityLabel.Text = mixed ? "Opaque quality" : "Quality";
-        AlphaQualityLabel.Visibility = mixed ? Visibility.Visible : Visibility.Collapsed;
-        AlphaQualityCombo.Visibility = mixed ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void OnBrowseFolder(object sender, RoutedEventArgs e)
@@ -219,12 +208,6 @@ public partial class BatchRecompressDialog : ThemedDialog
         _busy = null;
         BusyShift.X = -140;
         BusyBar.Visibility = Visibility.Collapsed;
-    }
-
-    /// <summary>Combo item binding an enum value to a display label.</summary>
-    private sealed record RuleOption(RecompressFormatRule Rule, string Label)
-    {
-        public override string ToString() => Label;
     }
 }
 

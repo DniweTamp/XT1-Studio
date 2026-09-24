@@ -111,9 +111,11 @@ value is a usage error), with
 `--backend managed|nvtt|cli`, `--quality`, `--mips`/`--no-mips`, `--solidify` and `--opaque`; a `.dds`
 input is imported losslessly. `replace-raw` detects an `XT1\0` record and replaces header+payload
 verbatim, otherwise it replaces the bare payload (a size mismatch needs `--force`). `recompress`
-converts ASTC textures to BC in place, the same as the batch tool (single-mip inputs are kept unless
-`--downscale-without-mips`). Exit codes: 0 success, 1 an operation failed, 2 bad usage or no unique
-match.
+re-encodes ASTC textures in place, the same as the batch tool, to a target chosen with
+`--rule bc1|bc1-bc3|bc1-bc7|bc7` or overridden per side with `--opaque-format`/`--alpha-format`
+(any encodable target such as `bc7`, `astc 8x8` or `rgba8`); the sRGB/UNORM variant follows each
+source, and single-mip inputs are kept unless `--downscale-without-mips`. Exit codes: 0 success,
+1 an operation failed, 2 bad usage or no unique match.
 
 ### Explorer thumbnails
 
@@ -354,12 +356,14 @@ a 3D volume carries every depth slice of each level and writes `resourceDimensio
 - **File → New empty bank...** authors a fresh `.wta`+`.wtp` (split bank, the layout most of the game
   uses) or standalone `.wtb` with no textures. An empty bank still enables *Add texture from image...*
   in the tree menu so it can be filled.
-- **Tools → Batch recompress (ASTC to BC)**: re-encodes ASTC textures to BC1/BC3/BC7, keeping the
-  existing mip levels (none are regenerated) and only touching textures that decode cleanly. Optional
-  half-size downscale (drops mip 0 when a chain exists, otherwise box-filters a single-mip image,
-  with a checkbox to skip images that have no mips), a choice of BC formats including an
-  opacity-aware BC1/BC3 or BC1/BC7 rule, UNORM/sRGB respected. Runs on the loaded document or over a
-  folder of `.dat`/`.wta`/`.wtb`/`.xt1` files with an optional recursive scan.
+- **Tools → Batch recompress (ASTC to BC)**: re-encodes ASTC textures to a chosen format, keeping the
+  existing mip levels (none are regenerated) and only touching textures that decode cleanly. Opaque and
+  alpha/transparent textures can target different formats; the dropdowns list every encodable format
+  (BC1–BC7, BC6H, RGBA8/BGRA8/L8 and every ASTC footprint), and each family's sRGB or UNORM variant
+  follows the source so a mixed bank is handled in one pass. Optional half-size downscale (drops mip 0
+  when a chain exists, otherwise box-filters a single-mip image, with a checkbox to skip images that
+  have no mips). Runs on the loaded document or over a folder of `.dat`/`.wta`/`.wtb`/`.xt1` files with
+  an optional recursive scan.
 - WTB sRGB/cubemap flags can be kept in step with a texture's format on add/replace (on by default),
   and new textures default to the model/UI bank class.
 - Undo/redo across field edits, raw byte edits, add/delete and re-encode.

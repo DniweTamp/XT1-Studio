@@ -7,24 +7,9 @@ using Xt1.Core.Xt1;
 
 namespace Xt1.Core.Editing;
 
-/// <summary>How the target BC format is chosen for a recompressed texture.</summary>
-public enum RecompressFormatRule
-{
-    /// <summary>Always BC1 (sRGB or UNORM following the source).</summary>
-    AlwaysBc1,
-
-    /// <summary>BC1 when the source is opaque, BC3 when it has alpha.</summary>
-    Bc1OrBc3,
-
-    /// <summary>BC1 when the source is opaque, BC7 when it has alpha.</summary>
-    Bc1OrBc7,
-
-    /// <summary>Always BC7.</summary>
-    AlwaysBc7,
-}
-
 public sealed record RecompressOptions(
-    RecompressFormatRule Rule,
+    RecompressTarget OpaqueFormat,
+    RecompressTarget AlphaFormat,
     bool Downscale,
     bool SkipDownscaleWithoutMips,
     EncoderBackend Backend,
@@ -32,17 +17,12 @@ public sealed record RecompressOptions(
     EncodeQuality AlphaQuality,
     bool SyncFlags)
 {
-    public static bool UsesSeparateAlphaQuality(RecompressFormatRule rule) =>
-        rule is RecompressFormatRule.Bc1OrBc3 or RecompressFormatRule.Bc1OrBc7;
-
     /// <summary>
-    /// Mixed rules can tune their opaque BC1 and alpha BC3/BC7 encodes independently. Fixed-format
-    /// rules use the primary (opaque) selector for every texture, regardless of its source alpha.
+    /// Textures with transparency use <see cref="AlphaFormat"/> at <see cref="AlphaQuality"/>; opaque
+    /// ones use <see cref="OpaqueFormat"/> at <see cref="OpaqueQuality"/>. Each target then resolves
+    /// to its sRGB or UNORM variant from the source, so a single choice fits a mixed bank.
     /// </summary>
-    public EncodeQuality QualityFor(bool hasAlpha) =>
-        hasAlpha && UsesSeparateAlphaQuality(Rule)
-            ? AlphaQuality
-            : OpaqueQuality;
+    public EncodeQuality QualityFor(bool hasAlpha) => hasAlpha ? AlphaQuality : OpaqueQuality;
 }
 
 public sealed record RecompressStats(int Files, int Converted, int Skipped);
@@ -154,7 +134,8 @@ public sealed class BatchRecompressor
         }
 
         bool hasAlpha = levels[0].HasTransparency();
-        var target = ChooseFormat(texture, options.Rule, hasAlpha);
+        var target = (hasAlpha ? options.AlphaFormat : options.OpaqueFormat)
+            .Resolve(source.IsSrgb);
         var encoder = _encoders.Pick(options.Backend, target);
 
         var working = levels;
@@ -200,23 +181,5 @@ public sealed class BatchRecompressor
 
         log.Report($"    #{texture.Index} {source.Name} -> {target.Name}, {quality} quality, {mips} mip(s)");
         return true;
-    }
-
-    private static FormatInfo ChooseFormat(EditableTexture texture, RecompressFormatRule rule, bool alpha)
-    {
-        bool srgb = texture.FormatInfo?.IsSrgb ?? false;
-        bool bc7 = rule switch
-        {
-            RecompressFormatRule.AlwaysBc7 => true,
-            RecompressFormatRule.Bc1OrBc7 => alpha,
-            _ => false,
-        };
-        if (bc7)
-            return FormatTable.Get(srgb ? Xt1Format.Bc7Srgb : Xt1Format.Bc7Unorm)!;
-
-        bool bc3 = rule == RecompressFormatRule.Bc1OrBc3 && alpha;
-        if (bc3)
-            return FormatTable.Get(srgb ? Xt1Format.Bc3Srgb : Xt1Format.Bc3Unorm)!;
-        return FormatTable.Get(srgb ? Xt1Format.Bc1Srgb : Xt1Format.Bc1Unorm)!;
     }
 }
