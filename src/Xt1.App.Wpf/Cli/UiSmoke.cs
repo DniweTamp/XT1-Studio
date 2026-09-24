@@ -274,6 +274,20 @@ internal static class UiSmoke
                         Expect("play starts the layer animation",
                             window.UiTestAnimationState.Contains("playing=True"),
                             window.UiTestAnimationState);
+
+                        // Switching preview tabs tears down and re-attaches the hosted GL window; a
+                        // paint queued against the old context must not take the window down.
+                        for (int i = 0; i < 4; i++)
+                        {
+                            window.UiTestSelectRightTab((i + 1) % 2);
+                            Pump(5);
+                        }
+                        window.UiTestSelectRightTab(0);
+                        Pump(5);
+                        Expect("playback survives preview tab switches",
+                            window.UiTestAnimationState.Contains("playing=True"),
+                            window.UiTestAnimationState);
+
                         var beforeTick = window.UiTestAnimationState;
                         window.UiTestAnimationTick();
                         Pump(5);
@@ -321,6 +335,30 @@ internal static class UiSmoke
                             Expect("a regular 2D texture hides the animation bar",
                                 flatState.Contains("visible=False"), flatState);
                         }
+                    }
+
+                    // Sky auto exposure: on by default for a cubemap, and toggling it drives the viewport.
+                    Step("--- sky auto exposure ---");
+                    if (window.UiTestSelectFirstCube() is "none" or "no document")
+                    {
+                        log("  [--] sky auto exposure: n/a (no cubemap in this bank)");
+                    }
+                    else
+                    {
+                        Pump(10);
+                        var on = window.UiTestAutoExposureState;
+                        log($"       auto exposure: {on}");
+                        Expect("sky auto exposure is on by default", on == "check=True applied=True", on);
+
+                        window.UiTestToggleAutoExposure();
+                        var off = window.UiTestAutoExposureState;
+                        Expect("turning auto exposure off reaches the viewport",
+                            off == "check=False applied=False", off);
+
+                        window.UiTestToggleAutoExposure();
+                        Expect("turning auto exposure back on reaches the viewport",
+                            window.UiTestAutoExposureState == "check=True applied=True",
+                            window.UiTestAutoExposureState);
                     }
 
                     Step("shell closed");

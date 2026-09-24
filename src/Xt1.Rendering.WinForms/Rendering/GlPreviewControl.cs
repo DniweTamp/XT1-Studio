@@ -57,6 +57,7 @@ public sealed class GlPreviewControl : GLControl, IThemedControl
     private bool _cubeDirty;
     private bool _cubeHdr;
     private bool _volumeDirty;
+    private float _autoExposureScale = 1f;
 
     private readonly OrbitCamera _camera = new();
     private bool _dragging;
@@ -144,6 +145,16 @@ public sealed class GlPreviewControl : GLControl, IThemedControl
 
     /// <summary>Linear exposure multiplier applied before gamma; 1.0 leaves the values unchanged.</summary>
     public float Exposure { get; set; } = 1f;
+
+    /// <summary>
+    /// Normalise the sky from the cubemap's own values before the user's exposure and gamma are
+    /// applied. On by default; the factor is derived from the uploaded faces, so it never adapts to
+    /// (or sees) the display controls.
+    /// </summary>
+    public bool AutoExposure { get; set; } = true;
+
+    /// <summary>The scene factor last derived from an uploaded cubemap; read-only diagnostics.</summary>
+    public float AutoExposureScale => _autoExposureScale;
 
     public float SliceX { get; set; } = 0.5f;
     public float SliceY { get; set; } = 0.5f;
@@ -249,7 +260,16 @@ public sealed class GlPreviewControl : GLControl, IThemedControl
             return;
         }
 
-        MakeCurrent();
+        // A paint can be dispatched after the hosted window's GL context has gone away (for example
+        // while the preview tabs swap the WindowsFormsHost, or during shutdown). Losing the context
+        // here must not throw out of the paint handler and take the window down, so the frame is
+        // skipped and the placeholder is painted instead; a later paint retries the context.
+        if (!TryMakeCurrent())
+        {
+            DrawFallbackMessage("GPU preview unavailable:\ncontext is not current");
+            return;
+        }
+
         try
         {
             if (Available)
@@ -264,10 +284,34 @@ public sealed class GlPreviewControl : GLControl, IThemedControl
             Available = false;
         }
 
-        SwapBuffers();
+        try
+        {
+            SwapBuffers();
+        }
+        catch
+        {
+            // The context went away mid-frame; the next paint will fall back above.
+        }
 
         if (!Available)
             DrawFallbackMessage();
+    }
+
+    /// <summary>
+    /// Make the GL context current without letting a dead context throw. The control can outlive its
+    /// context (a queued paint after the window is destroyed), so callers must tolerate a false result.
+    /// </summary>
+    private bool TryMakeCurrent()
+    {
+        try
+        {
+            MakeCurrent();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -277,7 +321,7 @@ public sealed class GlPreviewControl : GLControl, IThemedControl
     public Bitmap? RenderToBitmap(int width, int height)
     {
         if (!IsHandleCreated || !Available || width <= 0 || height <= 0) return null;
-        MakeCurrent();
+        if (!TryMakeCurrent()) return null;
 
         int framebuffer = GL.GenFramebuffer();
         int color = GL.GenTexture();
@@ -352,25 +396,34 @@ public sealed class GlPreviewControl : GLControl, IThemedControl
         return bitmap;
     }
 
-    private void DrawFallbackMessage()
+    private void DrawFallbackMessage(string? message = null)
     {
-        using var graphics = CreateGraphics();
-        graphics.Clear(BackColor);
-        using var font = new Font(FontFamily.GenericSansSerif, 9.5f);
-        using var brush = new SolidBrush(Color.Gainsboro);
-        var message = "GPU preview unavailable:\n" + (LastError ?? "unknown error");
-        graphics.DrawString(message, font, brush, new PointF(10, 10));
+        try
+        {
+            using var graphics = CreateGraphics();
+            graphics.Clear(BackColor);
+            using var font = new Font(FontFamily.GenericSansSerif, 9.5f);
+            using var brush = new SolidBrush(Color.Gainsboro);
+            graphics.DrawString(message ?? "GPU preview unavailable:\n" + (LastError ?? "unknown error"),
+                font, brush, new PointF(10, 10));
+        }
+        catch
+        {
+            // Painting the placeholder is best-effort: a teardown race must not throw from a paint.
+        }
     }
 
     private void UploadPendingTextures()
     {
         if (_cubeDirty && _pendingCubeFacesHdr is { Count: 6 })
         {
+            _autoExposureScale = ComputeAutoExposure(_pendingCubeFacesHdr);
             _cubeTexture = UploadCubeMapHdr(_pendingCubeFacesHdr, _cubeTexture);
             _cubeDirty = false;
         }
         else if (_cubeDirty && _pendingCubeFaces is { Count: 6 })
         {
+            _autoExposureScale = ComputeAutoExposure(_pendingCubeFaces);
             _cubeTexture = UploadCubeMap(_pendingCubeFaces, _cubeTexture);
             _cubeDirty = false;
         }
@@ -409,6 +462,59 @@ public sealed class GlPreviewControl : GLControl, IThemedControl
         }
         return result;
     }
+
+    /// <summary>
+    /// Scene factor for an 8-bit cubemap: the geometric mean of the stored luminance, mapped to middle
+    /// grey. Sampled with a stride so a large face costs a bounded number of reads.
+    /// </summary>
+    private static float ComputeAutoExposure(IReadOnlyList<RgbaImage> faces) =>
+        ComputeAutoExposure(faces, static face => face.Width, static face => face.Height,
+            static (face, x, y) =>
+            {
+                var (r, g, b, _) = face.GetPixel(x, y);
+                return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0;
+            });
+
+    /// <summary>Scene factor for a linear HDR cubemap; same statistic, on the unclamped float values.</summary>
+    private static float ComputeAutoExposure(IReadOnlyList<FloatImage> faces) =>
+        ComputeAutoExposure(faces, static face => face.Width, static face => face.Height,
+            static (face, x, y) =>
+            {
+                var (r, g, b, _) = face.GetPixel(x, y);
+                return Math.Max(0.0, 0.2126 * r + 0.7152 * g + 0.0722 * b);
+            });
+
+    /// <summary>
+    /// Shared accumulator for both cube representations. Only the per-texel luminance differs between
+    /// the stored-8-bit and linear-float paths, and both feed the one <c>uAutoExposureScale</c> uniform,
+    /// so the statistic itself lives here once to keep the two paths from drifting apart.
+    /// </summary>
+    private static float ComputeAutoExposure<T>(
+        IReadOnlyList<T> faces, Func<T, int> widthOf, Func<T, int> heightOf,
+        Func<T, int, int, double> luminanceAt)
+    {
+        double logSum = 0;
+        long count = 0;
+        foreach (var face in faces)
+        {
+            int width = widthOf(face);
+            int height = heightOf(face);
+            int step = AutoExposureStep(width, height);
+            for (int y = 0; y < height; y += step)
+            {
+                for (int x = 0; x < width; x += step)
+                {
+                    logSum += Math.Log(luminanceAt(face, x, y) + Xt1.Core.Imaging.AutoExposure.MinLuminance);
+                    count++;
+                }
+            }
+        }
+        return Xt1.Core.Imaging.AutoExposure.Scale(logSum, count);
+    }
+
+    /// <summary>Sample enough texels to be stable without reading every pixel of a large face.</summary>
+    private static int AutoExposureStep(int width, int height) =>
+        Math.Max(1, (int)Math.Sqrt(width * (double)height / 4096.0));
 
     private static int UploadCubeMap(IReadOnlyList<RgbaImage> faces, int existing)
     {
@@ -519,6 +625,8 @@ public sealed class GlPreviewControl : GLControl, IThemedControl
             GL.Uniform1(Loc(_skyProgram, "uHdr"), _cubeHdr ? 1 : 0);
             GL.Uniform1(Loc(_skyProgram, "uGamma"), Gamma <= 0f ? 1f : Gamma);
             GL.Uniform1(Loc(_skyProgram, "uExposure"), Exposure);
+            GL.Uniform1(Loc(_skyProgram, "uAutoExposure"), AutoExposure ? 1 : 0);
+            GL.Uniform1(Loc(_skyProgram, "uAutoExposureScale"), _autoExposureScale);
             GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
             return;
         }
@@ -787,14 +895,21 @@ uniform int uOpaque;   // 1 = ignore the stored alpha
 uniform int uHdr;      // 1 = values are linear HDR and need a tone map
 uniform float uGamma;  // display gamma (1.0 = unchanged)
 uniform float uExposure;
+uniform int uAutoExposure;          // 1 = normalise the sky from the cubemap first
+uniform float uAutoExposureScale;   // scene factor derived from the cubemap's own values
 void main()
 {
     vec3 dir = normalize(uRot * vec3(vUv.x * uAspect * uFov, vUv.y * uFov, -1.0));
     vec4 s = texture(uCube, dir);
-    vec3 col = s.rgb;
-    if (uChannel == 1) col = vec3(s.r);
-    else if (uChannel == 2) col = vec3(s.g);
-    else if (uChannel == 3) col = vec3(s.b);
+    // Auto exposure normalises the scene and is derived from the cubemap alone, so it scales RGB
+    // before channel isolation: it runs before the user's exposure/gamma and never adapts to them,
+    // and it must not scale an isolated alpha value with an RGB-luminance factor.
+    vec3 scene = s.rgb;
+    if (uAutoExposure == 1) scene = max(scene * uAutoExposureScale, vec3(0.0));
+    vec3 col = scene;
+    if (uChannel == 1) col = vec3(scene.r);
+    else if (uChannel == 2) col = vec3(scene.g);
+    else if (uChannel == 3) col = vec3(scene.b);
     else if (uChannel == 4) col = vec3(s.a);
     // Exposure acts on the unclamped values; the HDR path then tone maps so lowering exposure
     // reveals highlights instead of just darkening a clipped image.

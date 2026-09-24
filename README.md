@@ -134,7 +134,8 @@ Caveats worth knowing:
 renders it offscreen and checks the result numerically, writing the frames as PNGs: that the volume
 draws and sits centered, that orbiting changes the image, that channel isolation and the opacity
 source reach the shader, that the slice planes stay inside the volume's projected box, and that the
-skybox draws and responds to turning and zoom. It reports `n/a` rather than a failure where the data
+skybox draws and responds to turning and zoom, and that auto exposure is derived from the cubemap
+rather than the user's exposure. It reports `n/a` rather than a failure where the data
 cannot show a difference (a flat skybox, a gray volume). Options: `--index`, `--hash`, `--bank`,
 `--mip`, `--out`, `--mode rgb|alpha|mip`, `--channel rgba|r|g|b|a`, `--yaw`, `--pitch`,
 `--distance`, `--size`, `--density`.
@@ -286,7 +287,10 @@ tests/Xt1.Core.Tests      468 tests, real-file validation against D:\Bayonetta3\
     edge is wrapped back to the middle so a long turn does not stall; wheel changes the field of
     view; double-click or Home resets. The shared channel selector isolates R/G/B/A here too, and explicit
     **Gamma** / **Exposure** controls appear in the preview bar; because they drive the sky render they
-    are shown for cubemaps only (a volume shows slice/render/slice-plane controls instead).
+    are shown for cubemaps only (a volume shows slice/render/slice-plane controls instead). **Auto
+    exposure** (on by default) normalises the sky to a middle-grey key from the cubemap's own
+    luminance before those controls, so gamma and exposure are applied after it and never feed back
+    into it.
   - **3D texture**: the whole volume assembled into one ray-marched object. The camera orbits it —
     the target stays at the origin for every angle, drag swings the object round, wheel dollies in
     and out, double-click resets. A faint bounding box is drawn so the object reads even where it is

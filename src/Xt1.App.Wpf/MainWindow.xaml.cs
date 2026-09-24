@@ -232,6 +232,7 @@ public partial class MainWindow : Window
 
             GammaBox.Text = "1.00";
             ExposureBox.Text = "1.00";
+            AutoExposureCheck.IsChecked = true;
 
             OpaqueCheck.IsChecked = App.Settings.OpaqueAlphaByDefault;
         }
@@ -1016,6 +1017,16 @@ public partial class MainWindow : Window
     }
 
     private void OnGammaExposureChanged(object sender, RoutedEventArgs e) => CommitGammaExposure();
+
+    /// <summary>
+    /// Toggle the sky's auto exposure. It is independent of gamma/exposure, which are applied after it.
+    /// </summary>
+    private void OnAutoExposureChanged(object sender, RoutedEventArgs e)
+    {
+        bool on = AutoExposureCheck.IsChecked == true;
+        GlView.AutoExposure = on;
+        StatusLeft.Text = on ? "Sky auto exposure on." : "Sky auto exposure off.";
+    }
 
     /// <summary>Clamp the volume gamma/exposure boxes to the WinForms numeric ranges.</summary>
     private void CommitGammaExposure()
@@ -2363,6 +2374,7 @@ public partial class MainWindow : Window
         GlView.ShowSlices = ShowSlicesCheck.IsChecked == true;
         GlView.Gamma = ParseFloat(GammaBox.Text, 1f);
         GlView.Exposure = ParseFloat(ExposureBox.Text, 1f);
+        GlView.AutoExposure = AutoExposureCheck.IsChecked == true;
         GlView.SliceZ = 0.5f;
         GlView.OpaqueAlpha = OpaqueCheck.IsChecked == true;
         GlView.Channel = Preview2D.Channel;

@@ -75,6 +75,35 @@ public partial class MainWindow
 
     internal void UiTestToggleOpaque() => OpaqueCheck.IsChecked = OpaqueCheck.IsChecked != true;
 
+    /// <summary>The sky auto-exposure checkbox value and the value pushed to the viewport.</summary>
+    internal string UiTestAutoExposureState =>
+        $"check={AutoExposureCheck.IsChecked == true} applied={GlView.AutoExposure}";
+
+    /// <summary>Click the sky auto-exposure checkbox through its real handler.</summary>
+    internal void UiTestToggleAutoExposure()
+    {
+        AutoExposureCheck.IsChecked = AutoExposureCheck.IsChecked != true;
+        OnAutoExposureChanged(this, new RoutedEventArgs());
+    }
+
+    /// <summary>Select the first cubemap, so the sky controls (incl. auto exposure) can be checked.</summary>
+    internal string UiTestSelectFirstCube()
+    {
+        if (_document is null) return "no document";
+        for (int s = 0; s < _document.Sections.Count; s++)
+        {
+            var textures = _document.Sections[s].Bank.Textures;
+            for (int t = 0; t < textures.Count; t++)
+            {
+                var type = textures[t].Header.Type;
+                if (!type.IsCube()) continue;
+                UiTestSelectTexture(s, t);
+                return $"#{textures[t].Index} {type.Describe()}";
+            }
+        }
+        return "none";
+    }
+
     /// <summary>0 = RGB, 1 = Alpha, 2 = MIP.</summary>
     internal void UiTestSelectVolumeMode(int index)
     {

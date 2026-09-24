@@ -350,6 +350,10 @@
                                                  Width="58" FontFamily="Consolas" VerticalContentAlignment="Center"
                                                  ToolTip="Exposure multiplier applied before gamma (0.05 - 20.00); acts on the unclamped HDR sky values"
                                                  LostFocus="OnGammaExposureChanged" KeyDown="OnGammaExposureKeyDown" />
+                                        <CheckBox x:Name="AutoExposureCheck" Style="{StaticResource PillCheckBox}"
+                                                  Content="Auto exposure" Margin="14,0,0,0" IsChecked="True"
+                                                  ToolTip="Normalise the sky to a middle-grey key from the cubemap's own values; gamma and exposure above are applied afterwards"
+                                                  Click="OnAutoExposureChanged" />
                                     </StackPanel>
                                 </StackPanel>
                             </Border>

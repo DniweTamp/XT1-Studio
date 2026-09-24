@@ -51,6 +51,7 @@ public sealed partial class GlVolumeView : UserControl
     private bool _showSlices;
     private float _gamma = 1f;
     private float _exposure = 1f;
+    private bool _autoExposure = true;
     private float _sliceZ = 0.5f;
     private bool _opaqueAlpha;
     private int _resolutionCap = 512;
@@ -126,6 +127,21 @@ public sealed partial class GlVolumeView : UserControl
         {
             _exposure = value;
             Push(c => { c.Exposure = value; c.Invalidate(); });
+        }
+    }
+
+    /// <summary>
+    /// Normalise the sky from the cubemap's own values before gamma/exposure are applied. On by
+    /// default; the factor lives in the renderer and is derived from the uploaded faces, so the user's
+    /// controls never feed back into it.
+    /// </summary>
+    public bool AutoExposure
+    {
+        get => _autoExposure;
+        set
+        {
+            _autoExposure = value;
+            Push(c => { c.AutoExposure = value; c.Invalidate(); });
         }
     }
 

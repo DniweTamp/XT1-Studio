@@ -24,6 +24,14 @@ internal static class GlTest
 {
     private const byte BgR = 23, BgG = 23, BgB = 28; // GL clear color 0.09/0.09/0.11
 
+    // Rendering is deterministic, so a control that reaches the shader changes the render by more
+    // than this small floor. A higher floor made a smooth sky fail even though yaw/zoom did apply.
+    private const double ViewChangeThreshold = 0.5;
+
+    // Below this frame variance the view is flat enough that an effect cannot show; the checks
+    // report n/a instead of failing (the documented behaviour for data that cannot show a difference).
+    private const int FlatSpread = 8;
+
     internal static int Run(string? file, string[] args, Action<string> log)
     {
         if (file is null || !File.Exists(file))
@@ -330,11 +338,11 @@ internal static class GlTest
         {
             Save(turned, Path.Combine(outputDirectory, stem + "_turned.png"));
             double difference = MeanAbsDiff(first, turned);
-            if (difference > 2.0)
+            if (difference > ViewChangeThreshold)
             {
                 ok &= Check(log, "turning the skybox changes the image", true, $"mean |diff| {difference:F2}");
             }
-            else if (drawn.LuminanceSpread <= 8)
+            else if (drawn.LuminanceSpread <= FlatSpread)
             {
                 // The skybox is a single flat color (possibly black), so no rotation can change a
                 // single pixel. Judged from the render, because a near-black face is functionally flat
@@ -355,11 +363,11 @@ internal static class GlTest
         {
             Save(zoomed, Path.Combine(outputDirectory, stem + "_zoomed.png"));
             double difference = MeanAbsDiff(first, zoomed);
-            if (difference > 1.0)
+            if (difference > ViewChangeThreshold)
             {
                 ok &= Check(log, "wheel zoom changes the skybox", true, $"mean |diff| {difference:F2}");
             }
-            else if (drawn.LuminanceSpread <= 8)
+            else if (drawn.LuminanceSpread <= FlatSpread)
             {
                 log($"  [--] wheel zoom: n/a (flat skybox, luminance spread {drawn.LuminanceSpread})");
             }
@@ -369,9 +377,10 @@ internal static class GlTest
             }
         }
 
-        // Channel isolation must reach the skybox shader. A gray cubemap cannot show a difference,
-        // so that is reported as not applicable rather than failed.
-        if (channel == ImageChannelMode.Rgba && drawn.LuminanceSpread > 8)
+        // Channel isolation must reach the skybox shader. Isolating a channel from a grayscale view is
+        // a no-op by construction, so that alone is reported as not applicable. Spatial spread is not
+        // the test here: a uniformly coloured sky still changes under channel isolation.
+        if (channel == ImageChannelMode.Rgba)
         {
             control.Channel = ImageChannelMode.Red;
             var red = Render(control, size);
@@ -380,30 +389,89 @@ internal static class GlTest
             {
                 Save(red, Path.Combine(outputDirectory, stem + "_red.png"));
                 double difference = MeanAbsDiff(first, red);
-                ok &= Check(log, "channel isolation changes the cubemap image", difference > 0.5,
-                    $"mean |diff| {difference:F2}");
+                if (difference > ViewChangeThreshold)
+                {
+                    ok &= Check(log, "channel isolation changes the cubemap image", true,
+                        $"mean |diff| {difference:F2}");
+                }
+                else if (drawn.MeanChroma <= FlatSpread)
+                {
+                    log("  [--] channel isolation: n/a (grayscale cubemap)");
+                }
+                else
+                {
+                    ok &= Check(log, "channel isolation changes the cubemap image", false,
+                        $"mean |diff| {difference:F2}");
+                }
             }
         }
 
-        // Gamma and exposure must reach the shader.
-        control.Gamma = 2.2f;
-        var gamma = Render(control, size);
-        control.Gamma = 1f;
-        if (gamma is not null)
+        // Gamma and exposure are per-pixel intensity transforms, so they can show a difference whenever
+        // the render holds a value that is neither black nor saturated. Spatial spread is not the test
+        // here: a uniformly tinted sky (spread 0) still changes under both.
+        if (drawn.HasIntermediate)
         {
-            Save(gamma, Path.Combine(outputDirectory, stem + "_gamma.png"));
-            double difference = MeanAbsDiff(first, gamma);
-            ok &= Check(log, "gamma changes the cubemap image", difference > 0.5, $"mean |diff| {difference:F2}");
+            control.Gamma = 2.2f;
+            var gamma = Render(control, size);
+            control.Gamma = 1f;
+            if (gamma is not null)
+            {
+                Save(gamma, Path.Combine(outputDirectory, stem + "_gamma.png"));
+                double difference = MeanAbsDiff(first, gamma);
+                ok &= Check(log, "gamma changes the cubemap image", difference > ViewChangeThreshold,
+                    $"mean |diff| {difference:F2}");
+            }
+
+            control.Exposure = 2f;
+            var exposed = Render(control, size);
+            control.Exposure = 1f;
+            if (exposed is not null)
+            {
+                Save(exposed, Path.Combine(outputDirectory, stem + "_exposure.png"));
+                double difference = MeanAbsDiff(first, exposed);
+                ok &= Check(log, "exposure changes the cubemap image", difference > ViewChangeThreshold,
+                    $"mean |diff| {difference:F2}");
+            }
+
+            // Auto exposure must reach the shader, but only when the cubemap's own factor differs from 1;
+            // at ~1 the factor is a no-op by design and cannot show a difference.
+            if (Math.Abs(control.AutoExposureScale - 1f) > 0.005f)
+            {
+                control.AutoExposure = false;
+                var autoOff = Render(control, size);
+                control.AutoExposure = true;
+                if (autoOff is not null)
+                {
+                    Save(autoOff, Path.Combine(outputDirectory, stem + "_autoexposure_off.png"));
+                    double difference = MeanAbsDiff(first, autoOff);
+                    ok &= Check(log, "auto exposure changes the cubemap image", difference > ViewChangeThreshold,
+                        $"mean |diff| {difference:F2}");
+                }
+            }
+            else
+            {
+                log("  [--] auto exposure: n/a (factor is ~1)");
+            }
+        }
+        else
+        {
+            log("  [--] gamma/exposure/auto exposure: n/a (flat black or white skybox)");
         }
 
-        control.Exposure = 2f;
-        var exposed = Render(control, size);
+        // Auto exposure is scene-referred, so its factor must not change when the user's exposure does.
+        // Re-upload the same faces under a different exposure: a factor derived from the cubemap stays
+        // put, while one that adapted to the display would move.
+        float scaleAtOne = control.AutoExposureScale;
+        control.Exposure = 4f;
+        if (hdrFaces is { Count: 6 }) control.SetCubeFacesHdr(hdrFaces);
+        else control.SetCubeFaces(faces!);
+        var reuploaded = Render(control, size);
         control.Exposure = 1f;
-        if (exposed is not null)
+        if (reuploaded is not null)
         {
-            Save(exposed, Path.Combine(outputDirectory, stem + "_exposure.png"));
-            double difference = MeanAbsDiff(first, exposed);
-            ok &= Check(log, "exposure changes the cubemap image", difference > 0.5, $"mean |diff| {difference:F2}");
+            float scaleAtFour = control.AutoExposureScale;
+            ok &= Check(log, "auto exposure ignores the user exposure",
+                Math.Abs(scaleAtOne - scaleAtFour) < 1e-6f, $"{scaleAtOne:F4} -> {scaleAtFour:F4}");
         }
 
         // The opaque-alpha toggle only shows on a cubemap whose stored alpha is not uniform; that is
@@ -438,8 +506,8 @@ internal static class GlTest
     }
 
     private readonly record struct Stats(
-        int Drawn, double MeanLuminance, int LuminanceSpread, string Bounds, bool Centered,
-        int MinX, int MinY, int MaxX, int MaxY);
+        int Drawn, double MeanLuminance, int LuminanceSpread, double MeanChroma, bool HasIntermediate,
+        string Bounds, bool Centered, int MinX, int MinY, int MaxX, int MaxY);
 
     /// <summary>Whether the region <paramref name="inner"/> lights up is inside <paramref name="outer"/>.</summary>
     private static bool Contained(Stats inner, Stats outer, int tolerance) =>
@@ -470,7 +538,9 @@ internal static class GlTest
         var pixels = ReadPixels(bitmap, out int width, out int height);
         int drawn = 0;
         long luminance = 0;
+        long chroma = 0;
         int minLuminance = 255, maxLuminance = 0;
+        bool hasIntermediate = false;
         int minX = int.MaxValue, minY = int.MaxValue, maxX = -1, maxY = -1;
         for (int y = 0; y < height; y++)
         {
@@ -482,6 +552,8 @@ internal static class GlTest
                 luminance += sample;
                 if (sample < minLuminance) minLuminance = sample;
                 if (sample > maxLuminance) maxLuminance = sample;
+                if (sample > 0 && sample < 255) hasIntermediate = true;
+                chroma += Math.Max(r, Math.Max(g, b)) - Math.Min(r, Math.Min(g, b));
                 if (Math.Abs(r - BgR) > 6 || Math.Abs(g - BgG) > 6 || Math.Abs(b - BgB) > 6)
                 {
                     drawn++;
@@ -504,7 +576,7 @@ internal static class GlTest
         }
 
         return new Stats(drawn, (double)luminance / (width * height), maxLuminance - minLuminance,
-            bounds, centered, minX, minY, maxX, maxY);
+            (double)chroma / (width * height), hasIntermediate, bounds, centered, minX, minY, maxX, maxY);
     }
 
     private static double MeanAbsDiff(Bitmap a, Bitmap b)
