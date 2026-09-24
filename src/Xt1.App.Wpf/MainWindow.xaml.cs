@@ -441,7 +441,7 @@ public partial class MainWindow : Window
 
     private void OnMenuSettings(object sender, RoutedEventArgs e)
     {
-        var dialog = new SettingsDialog(App.Settings, _encoderDescription) { Owner = this };
+        var dialog = new SettingsDialog(App.Settings, _encoderDescription, _nvttActive) { Owner = this };
         if (dialog.ShowDialog() != true) return;
 
         var result = dialog.Result;
@@ -482,6 +482,7 @@ public partial class MainWindow : Window
 
         _encoders = new EncoderPicker(nvtt, cli: null);
         _recompressor = new BatchRecompressor(_encoders);
+        _nvttActive = nvtt is not null;
         _encoderDescription = nvtt is not null
             ? "NVTT (nvtt30205.dll)"
             : "Built-in managed encoder (NVTT not found)";
@@ -489,6 +490,9 @@ public partial class MainWindow : Window
 
     /// <summary>Which encoder the app will actually use, for the status bar and the Settings dialog.</summary>
     private string _encoderDescription = "Built-in managed encoder";
+
+    /// <summary>Whether NVTT (rather than the built-in fallback) is the encoder the app resolved.</summary>
+    private bool _nvttActive;
 
     /// <summary>The encoder description shown in Settings; the app never asks the user to choose one.</summary>
     internal string EncoderDescription => _encoderDescription;

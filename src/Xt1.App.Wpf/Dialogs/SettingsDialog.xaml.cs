@@ -27,7 +27,7 @@ public partial class SettingsDialog : ThemedDialog
     /// <summary>A copy of the settings passed in, updated in place when the user accepts.</summary>
     public AppSettings Result { get; }
 
-    public SettingsDialog(AppSettings current, string encoderDescription)
+    public SettingsDialog(AppSettings current, string encoderDescription, bool nvttActive)
     {
         Result = CopyOf(current);
         InitializeComponent();
@@ -37,6 +37,7 @@ public partial class SettingsDialog : ThemedDialog
         // found: NVTT is optional, an explicit path wins, and a path that does not exist falls back to
         // the app folder, the NVIDIA install directories, then PATH.
         EncoderText.Text = encoderDescription;
+        ApplyEncoderStatus(nvttActive);
         NvttDllBox.Text = Result.NvttDllPath ?? string.Empty;
         UpdateNvttHint();
 
@@ -57,6 +58,22 @@ public partial class SettingsDialog : ThemedDialog
         RefreshShell();
         ShellMachineCheck.Checked += (_, _) => RefreshShell();
         ShellMachineCheck.Unchecked += (_, _) => RefreshShell();
+    }
+
+    /// <summary>
+    /// Tint the encoder verdict box when NVTT is actually in use, and say when it was picked up by
+    /// auto-detection rather than from a path the user configured.
+    /// </summary>
+    private void ApplyEncoderStatus(bool nvttActive)
+    {
+        if (!nvttActive) return;
+
+        if (string.IsNullOrWhiteSpace(Result.NvttDllPath))
+            EncoderText.Text += " - auto detected";
+
+        EncoderStatusBox.SetResourceReference(Border.BackgroundProperty, "Brush.Success");
+        EncoderStatusBox.SetResourceReference(Border.BorderBrushProperty, "Brush.Success");
+        EncoderText.SetResourceReference(TextBlock.ForegroundProperty, "Brush.SuccessText");
     }
 
     /// <summary>Reflect the current registration state in the button label, enabled state and status.</summary>
