@@ -6,7 +6,11 @@ using Xt1.Core.Interop;
 
 namespace Xt1.Core.Settings;
 
-/// <summary>Which UI theme the app uses. <see cref="System"/> follows the OS light/dark preference.</summary>
+/// <summary>
+/// Which UI theme the app uses. <see cref="System"/> is only the unresolved initial default: the shell
+/// snaps it to Light or Dark from the OS preference at startup, so a running session is always concrete
+/// and the Theme button only toggles between the two.
+/// </summary>
 public enum AppTheme
 {
     System,
@@ -17,7 +21,9 @@ public enum AppTheme
 /// <summary>Application settings, persisted to <c>settings.json</c> next to the executable.</summary>
 public sealed class AppSettings
 {
-    /// <summary>UI theme choice. Defaults to following the OS until the user picks one explicitly.</summary>
+    /// <summary>UI theme choice. <see cref="AppTheme.System"/> means no choice has been recorded (a fresh
+    /// install or an older config); the shell resolves it to the OS preference at startup without saving,
+    /// so a running session is always concrete Light or Dark.</summary>
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public AppTheme Theme { get; set; } = AppTheme.System;
 

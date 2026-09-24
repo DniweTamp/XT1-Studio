@@ -8,7 +8,10 @@
          The host therefore only ever holds the GL control, and the shell collapses this whole
          view when it needs the empty-state placeholder to be visible. -->
     <Grid Background="Transparent" ClipToBounds="True">
-        <wfi:WindowsFormsHost x:Name="Host" />
+        <!-- The WindowsFormsHost container sits behind the GL child. The child is rounded with a window
+             region (see ApplyRoundedRegion), so its corners expose that container; without a themed
+             background here those corners stay the default SystemColors.Control (white) in every theme. -->
+        <wfi:WindowsFormsHost x:Name="Host" Background="{DynamicResource Brush.Viewer}" />
     </Grid>
 </UserControl>
 

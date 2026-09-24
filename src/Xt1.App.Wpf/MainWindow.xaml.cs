@@ -211,12 +211,17 @@ public partial class MainWindow : Window
         ThemeButton.ToolTip = $"Theme: {App.Settings.Theme}. Click for {NextTheme(App.Settings.Theme)}.";
     }
 
-    /// <summary>System -> Light -> Dark -> System, so the Theme button can reach every preference.</summary>
+    /// <summary>
+    /// The Theme button flips between light and dark. When the preference is <see cref="AppTheme.System"/>
+    /// the resolved appearance decides the target, so a click always changes what is on screen instead of
+    /// landing on a preference that resolves to the current look (which made the first light/dark click
+    /// appear to do nothing).
+    /// </summary>
     private static AppTheme NextTheme(AppTheme theme) => theme switch
     {
-        AppTheme.System => AppTheme.Light,
         AppTheme.Light => AppTheme.Dark,
-        _ => AppTheme.System,
+        AppTheme.Dark => AppTheme.Light,
+        _ => ThemeManager.IsDark ? AppTheme.Light : AppTheme.Dark,
     };
 
     private void PopulateToolbar()
