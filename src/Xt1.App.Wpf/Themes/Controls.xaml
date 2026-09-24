@@ -551,7 +551,8 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="Bd" Background="Transparent" CornerRadius="6" Padding="10,5">
+                    <Border x:Name="Bd" Background="Transparent" BorderBrush="Transparent" BorderThickness="1"
+                            CornerRadius="6" Padding="9,4">
                         <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
@@ -565,7 +566,6 @@
                             <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.ControlHover}" />
                         </Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True">
-                            <Setter TargetName="Bd" Property="BorderThickness" Value="1" />
                             <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Accent}" />
                         </Trigger>
                     </ControlTemplate.Triggers>
@@ -580,12 +580,13 @@
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="MinWidth" Value="210" />
-        <Setter Property="Padding" Value="10,6" />
+        <Setter Property="Padding" Value="9,5" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="MenuItem">
                     <Grid>
                         <Border x:Name="Bd" CornerRadius="6" Background="{TemplateBinding Background}"
+                                BorderBrush="Transparent" BorderThickness="1"
                                 Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -619,7 +620,7 @@
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="Role" Value="TopLevelHeader">
-                            <Setter Property="Padding" Value="10,5" />
+                            <Setter Property="Padding" Value="9,4" />
                         </Trigger>
                         <Trigger Property="Role" Value="SubmenuHeader">
                             <Setter TargetName="Arrow" Property="Visibility" Value="Visible" />
@@ -631,7 +632,6 @@
                             <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.ControlHover}" />
                         </Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True">
-                            <Setter TargetName="Bd" Property="BorderThickness" Value="1" />
                             <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Accent}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
