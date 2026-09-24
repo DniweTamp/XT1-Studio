@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using Xt1.App.Wpf.Dialogs;
 using Xt1.App.Wpf.Inspector;
@@ -91,6 +92,7 @@ public partial class MainWindow : Window
     private int _mipIndex;
     private int _sliceIndex;
     private RgbaImage? _previewImage;
+    private RgbaImage? _sliceBuffer;
     private string? _lastDecodeError;
     private EditableTexture? _rawTexture;
     private HexEditorDialog? _hexDialog;
@@ -98,6 +100,11 @@ public partial class MainWindow : Window
     private string? _fileListFolder;
     private EncoderPicker _encoders = null!;
     private BatchRecompressor _recompressor = null!;
+
+    // Layer-animation playback for a multilayer (3D) texture, shown in the 2D tab.
+    private readonly DispatcherTimer _animTimer = new();
+    private bool _animPlaying;
+    private bool _suppressAnim;
 
     public MainWindow()
     {
@@ -122,12 +129,27 @@ public partial class MainWindow : Window
         };
 
         BuildPreviewContextMenu();
+        _animTimer.Tick += OnAnimTick;
         // Dropping a bank anywhere on the window opens it, like the WinForms shell.
         AllowDrop = true;
         DragOver += OnFileDragOver;
         Drop += OnFileDropped;
         // The status zoom readout tracks whichever preview tab is on screen.
-        ViewTabs.SelectionChanged += (_, _) => UpdateZoomReadout();
+        ViewTabs.SelectionChanged += (_, _) =>
+        {
+            UpdateZoomReadout();
+            if (ViewTabs.SelectedIndex == 1)
+            {
+                // The cross-section plane is only pushed while the 3D tab shows, so re-sync it when
+                // the 3D view comes back to reflect the layer chosen (or played) on the 2D tab.
+                ApplySliceZ();
+            }
+            else if (_selected is not null)
+            {
+                // Playback may have advanced the layer while the 2D tab was hidden.
+                UpdateVolumeSliceImage(_selected);
+            }
+        };
         // GridViewColumnHeader has no XAML Click hook per column; listen for it on the list.
         FileList.AddHandler(GridViewColumnHeader.ClickEvent, new RoutedEventHandler(OnFileColumnHeaderClick));
     }
@@ -149,6 +171,7 @@ public partial class MainWindow : Window
         ThemeManager.Changed -= OnThemeChanged;
         _exportCts?.Cancel();
         _exportCts?.Dispose();
+        _animTimer.Stop();
 
         // The raw-bytes dialog hides instead of closing, so it must be released explicitly.
         if (_hexDialog is not null)
@@ -549,6 +572,7 @@ public partial class MainWindow : Window
         {
             UpdateSliceControls(_selected, reset: true);
             UpdatePreview(_selected);
+            UpdateAnimationControls(_selected, reset: true);
             UpdateValidation(_selected);
         }
     }
@@ -738,22 +762,230 @@ public partial class MainWindow : Window
 
     private void OnSliceChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_suppressPreview) return;
-        _sliceIndex = Math.Max(0, SliceCombo.SelectedIndex);
-        ApplySliceZ();
-        if (_selected is not null)
-        {
-            UpdateVolumeSliceImage(_selected);
-            StatusLeft.Text = $"Volume slice {_sliceIndex + 1} of {SliceCombo.Items.Count}";
-        }
+        if (_suppressPreview || _suppressAnim || _selected is null) return;
+        if (!_selected.Header.Type.Is3D()) return;
+
+        // The combo lists every layer; a header edit can change the count before the combo is
+        // rebuilt, so the current layout value is authoritative for clamping.
+        SetSlice(SliceCombo.SelectedIndex, CurrentSliceCount(_selected));
+        StatusLeft.Text = $"Volume slice {_sliceIndex + 1} of {CurrentSliceCount(_selected)}";
     }
 
-    /// <summary>Map the slice combo index onto the viewport's 0..1 cross-section position.</summary>
+    /// <summary>
+    /// Map the slice combo index onto the viewport's 0..1 cross-section position. The plane only
+    /// exists in the 3D viewport, so nothing is pushed while the 2D tab is showing; otherwise every
+    /// animation frame would invalidate the volume render off screen.
+    /// </summary>
     private void ApplySliceZ()
     {
+        if (ViewTabs.SelectedIndex != 1) return;
+
         int count = SliceCombo.Items.Count;
         if (count > 1) GlView.SliceZ = _sliceIndex / (float)(count - 1);
     }
+
+    // --- layer animation ------------------------------------------------------------------
+
+    /// <summary>Number of layers (depth slices) at the current mip; 1 for a flat texture.</summary>
+    private int CurrentSliceCount(EditableTexture texture)
+    {
+        var layout = texture.Layout;
+        return layout.Applicable && _mipIndex >= 0 && _mipIndex < layout.Mips.Count
+            ? Math.Max(1, layout.Mips[_mipIndex].SliceCount)
+            : 1;
+    }
+
+    /// <summary>A multilayer (3D) texture whose layers can be read as animation frames.</summary>
+    private static bool CanAnimate(EditableTexture texture) => texture.Header.Type.Is3D();
+
+    /// <summary>
+    /// Frames actually playable: the layer count capped to the depth the viewport composed. A volume
+    /// deeper than the preview cap is truncated for the GPU, so playback stops at the last held layer
+    /// instead of decoding past it on every tick.
+    /// </summary>
+    private int AnimationFrameCount(EditableTexture texture)
+    {
+        int count = CurrentSliceCount(texture);
+        if (GlView.VolumeInfo is { } volume) count = Math.Min(count, volume.Depth);
+        return Math.Max(1, count);
+    }
+
+    /// <summary>
+    /// Show the 2D playback bar only for a multilayer (3D) texture; a regular 2D texture or a
+    /// cubemap hides it entirely. <paramref name="reset"/> stops playback when the selection changes.
+    /// </summary>
+    private void UpdateAnimationControls(EditableTexture? texture, bool reset = false)
+    {
+        int count = texture is not null && CanAnimate(texture) ? AnimationFrameCount(texture) : 0;
+        bool show = count > 1;
+
+        if (reset) SetAnimationPlaying(false);
+        AnimBar.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+
+        if (!show)
+        {
+            SetAnimationPlaying(false);
+            _suppressAnim = true;
+            try
+            {
+                AnimSlider.Maximum = 1;
+                AnimSlider.Value = 0;
+            }
+            finally
+            {
+                _suppressAnim = false;
+            }
+            AnimFrameText.Text = string.Empty;
+            return;
+        }
+
+        int clamped = Math.Clamp(_sliceIndex, 0, count - 1);
+        bool moved = clamped != _sliceIndex;
+        _sliceIndex = clamped;
+
+        _suppressAnim = true;
+        try
+        {
+            AnimSlider.Maximum = count - 1;
+            if (AnimSlider.Value != _sliceIndex) AnimSlider.Value = _sliceIndex;
+        }
+        finally
+        {
+            _suppressAnim = false;
+        }
+        UpdateAnimFrameText(count);
+
+        // The image may have been decoded at a now-clamped frame; refresh it to match the bar.
+        if (moved && texture is not null) UpdateVolumeSliceImage(texture);
+    }
+
+    private void OnAnimPlayToggle(object sender, RoutedEventArgs e)
+    {
+        SetAnimationPlaying(!_animPlaying);
+        StatusLeft.Text = _animPlaying && _selected is not null
+            ? $"Playing {AnimationFrameCount(_selected)} layers at {AnimationFps():0.##} fps."
+            : "Animation paused.";
+    }
+
+    private void SetAnimationPlaying(bool playing)
+    {
+        bool allowed = playing && _selected is not null && CanAnimate(_selected)
+                       && AnimationFrameCount(_selected) > 1;
+        _animPlaying = allowed;
+
+        if (allowed)
+        {
+            _animTimer.Interval = AnimationInterval();
+            _animTimer.Start();
+        }
+        else
+        {
+            _animTimer.Stop();
+        }
+
+        UpdateAnimPlayButton();
+    }
+
+    private void OnAnimTick(object? sender, EventArgs e)
+    {
+        if (!_animPlaying || _selected is null) return;
+
+        int count = AnimationFrameCount(_selected);
+        if (count <= 1)
+        {
+            SetAnimationPlaying(false);
+            return;
+        }
+
+        SetSlice(_sliceIndex + 1 >= count ? 0 : _sliceIndex + 1, count);
+    }
+
+    private void OnAnimSliderValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_suppressAnim || _selected is null) return;
+
+        // Scrubbing is a deliberate look at one layer, so it pauses playback.
+        SetAnimationPlaying(false);
+        int count = AnimationFrameCount(_selected);
+        SetSlice((int)Math.Round(e.NewValue), count);
+        StatusLeft.Text = $"Layer {_sliceIndex + 1} of {count}";
+    }
+
+    /// <summary>Move to a layer, keeping the 2D image, the slice combo and the time bar in step.</summary>
+    private void SetSlice(int index, int count)
+    {
+        if (_selected is null) return;
+
+        count = Math.Max(1, count);
+        _sliceIndex = Math.Clamp(index, 0, count - 1);
+
+        _suppressAnim = true;
+        try
+        {
+            int sliderMax = Math.Max(1, count - 1);
+            if (AnimSlider.Maximum != sliderMax) AnimSlider.Maximum = sliderMax;
+            if (AnimSlider.Value != _sliceIndex) AnimSlider.Value = _sliceIndex;
+            if (SliceCombo.Items.Count == count && SliceCombo.SelectedIndex != _sliceIndex)
+            {
+                _suppressPreview = true;
+                try
+                {
+                    SliceCombo.SelectedIndex = _sliceIndex;
+                }
+                finally
+                {
+                    _suppressPreview = false;
+                }
+            }
+        }
+        finally
+        {
+            _suppressAnim = false;
+        }
+
+        ApplySliceZ();
+        // The 2D pass is only needed while its tab is on screen; playback can continue on the 3D tab.
+        if (ViewTabs.SelectedIndex == 0) UpdateVolumeSliceImage(_selected);
+        UpdateAnimFrameText(count);
+    }
+
+    private void UpdateAnimFrameText(int count) =>
+        AnimFrameText.Text = count > 0 ? $"{_sliceIndex + 1} / {count}" : string.Empty;
+
+    private void UpdateAnimPlayButton()
+    {
+        AnimPlayIcon.Text = _animPlaying ? "\uE769" : "\uE768";
+        AnimPlayText.Text = _animPlaying ? "Pause" : "Play";
+    }
+
+    private void OnFpsKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        CommitAnimationFps();
+        e.Handled = true;
+    }
+
+    private void OnFpsChanged(object sender, RoutedEventArgs e) => CommitAnimationFps();
+
+    /// <summary>Clamp the FPS box to a usable range and retime a running animation.</summary>
+    private void CommitAnimationFps()
+    {
+        FpsBox.Text = AnimationFps().ToString("0.##", CultureInfo.InvariantCulture);
+        if (_animPlaying) _animTimer.Interval = AnimationInterval();
+    }
+
+    /// <summary>Playback speed; the field defaults to 15 fps and is clamped to 1 - 240.</summary>
+    private double AnimationFps()
+    {
+        // Match ClampNumber: accept the local decimal separator first, so "12,5" works on a
+        // comma-decimal locale instead of silently resetting to 15.
+        bool parsed = double.TryParse(FpsBox.Text, NumberStyles.Float, CultureInfo.CurrentCulture, out var fps)
+                      || double.TryParse(FpsBox.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out fps);
+        if (parsed && !double.IsNaN(fps)) return Math.Clamp(fps, 1, 240);
+        return 15;
+    }
+
+    private TimeSpan AnimationInterval() => TimeSpan.FromMilliseconds(1000.0 / AnimationFps());
 
     private void OnVolumeModeChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -1753,6 +1985,7 @@ public partial class MainWindow : Window
             SliceCombo.ItemsSource = null;
             _suppressPreview = false;
             VolumeBar.Visibility = Visibility.Collapsed;
+            UpdateAnimationControls(null);
             Preview3DTitle.Text = "No preview";
             Preview3DNote.Text = "Select a cube or volume texture to orbit it here.";
             GlView.SetTexture(null);
@@ -1790,6 +2023,7 @@ public partial class MainWindow : Window
 
         UpdateSummary(texture);
         UpdatePreview(texture);      // fills the 2D view and _lastDecodeError
+        UpdateAnimationControls(texture, reset: true);   // needs the viewport's composed depth
         UpdateValidation(texture);   // ...then reports the layout warnings plus that error
     }
 
@@ -2039,13 +2273,21 @@ public partial class MainWindow : Window
     {
         if (!texture.Header.Type.Is3D()) return;
 
-        var cached = GlView.GetVolumeSlice(_sliceIndex);
-        if (cached is not null)
+        // Reuse one slice buffer: the viewport copies the composed volume's slice into it in place,
+        // so playback does not allocate (and discard) a multi-megabyte image every frame.
+        if (GlView.VolumeInfo is { } size)
         {
-            Set2DImage(cached, null, null, preserveView: true);
-            return;
+            if (_sliceBuffer is null || _sliceBuffer.Width != size.Width || _sliceBuffer.Height != size.Height)
+                _sliceBuffer = new RgbaImage(size.Width, size.Height);
+
+            if (GlView.CopyVolumeSlice(_sliceIndex, _sliceBuffer))
+            {
+                Set2DImage(_sliceBuffer, null, null, preserveView: true);
+                return;
+            }
         }
 
+        _sliceBuffer = null;
         var slice = DecodeSubresource(texture, _mipIndex, 0, _sliceIndex, out var error);
         Set2DImage(slice, error, null, preserveView: true);
     }
@@ -2220,10 +2462,8 @@ public partial class MainWindow : Window
                 return;
             }
 
-            var layout = texture.Layout;
-            int slices = layout.Applicable && _mipIndex >= 0 && _mipIndex < layout.Mips.Count
-                ? Math.Max(1, layout.Mips[_mipIndex].SliceCount)
-                : 1;
+            // One source of truth for the slice count (shared with the animation bar's guards).
+            int slices = CurrentSliceCount(texture);
 
             var items = new List<string>(slices);
             for (int s = 0; s < slices; s++) items.Add($"slice {s}");

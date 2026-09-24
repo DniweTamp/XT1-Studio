@@ -254,6 +254,75 @@ internal static class UiSmoke
                             && window.UiTestVolumeState.Contains("render="), window.UiTestVolumeState);
                     }
 
+                    // The 2D layer-animation bar: a volume offers it, a flat texture never does.
+                    Step("--- layer animation ---");
+                    if (window.UiTestSelectFirstVolume() is "none" or "no document")
+                    {
+                        log("  [--] layer animation: n/a (no volume in this bank)");
+                    }
+                    else
+                    {
+                        window.UiTestSelectRightTab(0);
+                        Pump(10);
+                        var anim = window.UiTestAnimationState;
+                        log($"       animation: {anim}");
+                        Expect("a volume shows the 2D layer-animation bar", anim.Contains("visible=True"), anim);
+                        Expect("the playback speed defaults to 15 fps", anim.Contains("fps=15"), anim);
+
+                        window.UiTestToggleAnimation();
+                        Pump(10);
+                        Expect("play starts the layer animation",
+                            window.UiTestAnimationState.Contains("playing=True"),
+                            window.UiTestAnimationState);
+                        var beforeTick = window.UiTestAnimationState;
+                        window.UiTestAnimationTick();
+                        Pump(5);
+                        var afterTick = window.UiTestAnimationState;
+                        Expect("a playback tick advances to the next layer", beforeTick != afterTick,
+                            $"{beforeTick} -> {afterTick}");
+                        window.UiTestToggleAnimation();
+                        Expect("pause stops the layer animation",
+                            window.UiTestAnimationState.Contains("playing=False"),
+                            window.UiTestAnimationState);
+
+                        window.UiTestSetAnimationFps("300");
+                        Expect("an over-range FPS clamps to 240",
+                            window.UiTestAnimationState.Contains("fps=240 "),
+                            window.UiTestAnimationState);
+                        window.UiTestSetAnimationFps("0");
+                        Expect("a sub-range FPS clamps to 1",
+                            window.UiTestAnimationState.Contains("fps=1 "),
+                            window.UiTestAnimationState);
+
+                        window.UiTestSetAnimationFps("30");
+                        window.UiTestScrubAnimation(1);
+                        Pump(10);
+                        var scrubbed = window.UiTestAnimationState;
+                        log($"       scrubbed: {scrubbed}");
+                        Expect("scrubbing moves the time bar to the requested layer",
+                            scrubbed.Contains("frame=2/"), scrubbed);
+                        Expect("the FPS field accepts a new playback speed",
+                            scrubbed.Contains("fps=30"), scrubbed);
+                        Expect("scrubbing pauses playback",
+                            scrubbed.Contains("playing=False"), scrubbed);
+
+                        var flat = window.UiTestSelectFirstFlatTexture();
+                        log($"       flat texture: {flat}");
+                        if (flat is "none" or "no document")
+                        {
+                            log("  [--] regular 2D texture: n/a (none in this bank)");
+                        }
+                        else
+                        {
+                            window.UiTestSelectRightTab(0);
+                            Pump(10);
+                            var flatState = window.UiTestAnimationState;
+                            log($"       flat animation: {flatState}");
+                            Expect("a regular 2D texture hides the animation bar",
+                                flatState.Contains("visible=False"), flatState);
+                        }
+                    }
+
                     Step("shell closed");
                 }
                 finally

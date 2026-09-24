@@ -222,17 +222,65 @@
                             </StackPanel>
                         </TabItem.Header>
                         <Grid>
-                            <preview:Image2DView x:Name="Preview2D"
-                                                 ToolTip="Drag to pan, wheel to zoom, double-click to fit" />
-                            <StackPanel x:Name="PreviewEmpty" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                        IsHitTestVisible="False">
-                                <TextBlock Style="{StaticResource IconText}" FontSize="44" HorizontalAlignment="Center"
-                                           Foreground="{DynamicResource Brush.BorderStrong}" Text="&#xE91B;" />
-                                <TextBlock Text="No preview" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center"
-                                           Margin="0,14,0,0" Foreground="{DynamicResource Brush.Muted}" />
-                                <TextBlock Text="Open a texture or select an item from the asset browser."
-                                           HorizontalAlignment="Center" Margin="0,6,0,0" Foreground="{DynamicResource Brush.Muted}" />
-                            </StackPanel>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0">
+                                <preview:Image2DView x:Name="Preview2D"
+                                                     ToolTip="Drag to pan, wheel to zoom, double-click to fit" />
+                                <StackPanel x:Name="PreviewEmpty" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                            IsHitTestVisible="False">
+                                    <TextBlock Style="{StaticResource IconText}" FontSize="44" HorizontalAlignment="Center"
+                                               Foreground="{DynamicResource Brush.BorderStrong}" Text="&#xE91B;" />
+                                    <TextBlock Text="No preview" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center"
+                                               Margin="0,14,0,0" Foreground="{DynamicResource Brush.Muted}" />
+                                    <TextBlock Text="Open a texture or select an item from the asset browser."
+                                               HorizontalAlignment="Center" Margin="0,6,0,0" Foreground="{DynamicResource Brush.Muted}" />
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Layer animation: a 3D/multilayer texture whose depth is really a sequence
+                                 of animation frames can be played here. Shown only for such textures; a
+                                 regular 2D texture or a cubemap never sees it. -->
+                            <Border x:Name="AnimBar" Grid.Row="1" Visibility="Collapsed"
+                                    Background="{DynamicResource Brush.Card}"
+                                    BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0">
+                                <Grid Margin="12,6">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Button x:Name="AnimPlayButton" Grid.Column="0" Style="{StaticResource PillButton}"
+                                            Click="OnAnimPlayToggle" ToolTip="Play or pause the layer animation">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock x:Name="AnimPlayIcon" Style="{StaticResource IconText}" Text="&#xE768;" />
+                                            <TextBlock x:Name="AnimPlayText" Text="Play" Margin="7,0,0,0" />
+                                        </StackPanel>
+                                    </Button>
+
+                                    <TextBlock Grid.Column="1" Text="FPS" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource Brush.Muted}" Margin="16,0,7,0" />
+                                    <TextBox x:Name="FpsBox" Grid.Column="2" Style="{StaticResource FieldBox}"
+                                             Width="46" Text="15" FontFamily="Consolas" VerticalContentAlignment="Center"
+                                             ToolTip="Playback speed in frames per second (1 - 240)"
+                                             LostFocus="OnFpsChanged" KeyDown="OnFpsKeyDown" />
+
+                                    <Slider x:Name="AnimSlider" Grid.Column="3" Style="{StaticResource TimeBarSlider}"
+                                            Margin="16,0,0,0" MinWidth="80" SmallChange="1" LargeChange="1"
+                                            ToolTip="Scrub through the texture's layers / animation frames"
+                                            ValueChanged="OnAnimSliderValueChanged" />
+
+                                    <TextBlock x:Name="AnimFrameText" Grid.Column="4" VerticalAlignment="Center"
+                                               Margin="12,0,0,0" Foreground="{DynamicResource Brush.Muted}"
+                                               Text="0 / 0" />
+                                </Grid>
+                            </Border>
                         </Grid>
                     </TabItem>
                     <TabItem Style="{StaticResource UnderlineTabItem}">

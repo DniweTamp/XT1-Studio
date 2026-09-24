@@ -207,17 +207,27 @@ public sealed partial class GlVolumeView : UserControl
         }
     }
 
-    /// <summary>
-    /// One slice of the current volume, so the shell can show it without re-decoding. The slice is
-    /// read out of the single composed volume the viewport already holds rather than a second copy.
-    /// </summary>
-    public RgbaImage? GetVolumeSlice(int index)
-    {
-        if (_volume is not { } volume || index < 0 || index >= volume.Depth) return null;
+    /// <summary>Dimensions of the composed volume the viewport holds, or null when there is none.</summary>
+    public (int Width, int Height, int Depth)? VolumeInfo =>
+        _volume is { } volume ? (volume.Width, volume.Height, volume.Depth) : null;
 
-        var slice = new RgbaImage(volume.Width, volume.Height) { IsSrgb = volume.IsSrgb };
-        volume.Slice(index).CopyTo(slice.Pixels);
-        return slice;
+    /// <summary>
+    /// Copy one slice into a caller-owned buffer. Playback reads a slice per frame, so this avoids
+    /// allocating a full multi-megabyte image every tick. Returns false when there is no volume or
+    /// the destination does not match its size.
+    /// </summary>
+    public bool CopyVolumeSlice(int index, RgbaImage destination)
+    {
+        if (_volume is not { } volume || index < 0 || index >= volume.Depth) return false;
+        if (destination.Depth != 1
+            || destination.Width != volume.Width || destination.Height != volume.Height)
+        {
+            return false;
+        }
+
+        volume.Slice(index).CopyTo(destination.Pixels);
+        destination.IsSrgb = volume.IsSrgb;
+        return true;
     }
 
     /// <summary>

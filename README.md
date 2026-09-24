@@ -148,7 +148,9 @@ human at the keyboard.
 `--uitest` builds the real control tree, binds a texture to the inspector and pumps the message loop,
 printing a timestamp per step and failing if any step exceeds 5 s. It also drives the new surfaces the
 way clicks would and checks the result: the hash field parses a pasted value, **Calculate CRC32** matches
-`crc32(name) & 0x7FFFFFFF`, and the tree menu exposes (and correctly enables) import/export/delete. It
+`crc32(name) & 0x7FFFFFFF`, the tree menu exposes (and correctly enables) import/export/delete, and the
+2D layer-animation bar appears for a volume (default 15 fps, play/pause, scrub to a layer) but stays
+hidden for a flat texture. It
 exists because a layout blow-up (one control set per DAT sub-file) made the old properties tab take
 112 s on `em0000.dat` with no way to notice it headlessly.
 
@@ -268,7 +270,12 @@ tests/Xt1.Core.Tests      468 tests, real-file validation against D:\Bayonetta3\
   written (including ASTC), bank actions only when a bank is loaded, and so on.
 - 2D viewer: pan/zoom, mip selection, R/G/B/A isolation, alpha checkerboard. For a 3D
   texture it shows the currently selected slice (with pan/zoom preserved while scrubbing), so one
-  slice can be inspected while the GL tab shows the whole volume.
+  slice can be inspected while the GL tab shows the whole volume. Some 3D/multilayer textures are
+  really 2D animation sheets with one frame per layer, so a 3D texture also gets a layer-animation
+  bar on the 2D tab: Play/Pause, an FPS field (default 15), and a time bar to scrub to a specific
+  layer. Animation wraps over the layers the 3D viewport actually composed, so a volume truncated by
+  the preview cap plays to its last held layer. It is hidden for regular 2D and cubemap textures,
+  which have no frames to play.
 - GL viewport:
   - **Cubemap**: an inside-out skybox. Entering the view starts level and forward (it does not
     inherit the volume's orbit angles). Drag or the arrow keys look around (drag right turns right,

@@ -85,6 +85,51 @@ public partial class MainWindow
         $"render={VolumeModeCombo.SelectedItem ?? "none"} channel={ChannelCombo.SelectedItem ?? "none"} " +
         $"planes={ShowSlicesCheck.IsChecked == true} sliceZ={GlView.SliceZ:0.##} tab={ViewTabs.SelectedIndex}";
 
+    /// <summary>The 2D layer-animation bar's visibility, play state, speed and current frame.</summary>
+    internal string UiTestAnimationState
+    {
+        get
+        {
+            int count = _selected is null ? 0 : CurrentSliceCount(_selected);
+            return $"visible={AnimBar.Visibility == Visibility.Visible} playing={_animPlaying} " +
+                   $"fps={FpsBox.Text} frame={_sliceIndex + 1}/{count}";
+        }
+    }
+
+    /// <summary>Click the 2D animation bar's play/pause button.</summary>
+    internal void UiTestToggleAnimation() => OnAnimPlayToggle(this, new RoutedEventArgs());
+
+    /// <summary>Type a playback speed into the FPS field and commit it like the field does.</summary>
+    internal void UiTestSetAnimationFps(string fps)
+    {
+        FpsBox.Text = fps;
+        CommitAnimationFps();
+    }
+
+    /// <summary>Drag the time bar to a layer, through the real ValueChanged path.</summary>
+    internal void UiTestScrubAnimation(int index) => AnimSlider.Value = index;
+
+    /// <summary>Run one playback tick without waiting for the timer, so a check stays deterministic.</summary>
+    internal void UiTestAnimationTick() => OnAnimTick(this, EventArgs.Empty);
+
+    /// <summary>Select the first flat (non-3D, non-cube) texture, so its animation bar can be checked.</summary>
+    internal string UiTestSelectFirstFlatTexture()
+    {
+        if (_document is null) return "no document";
+        for (int s = 0; s < _document.Sections.Count; s++)
+        {
+            var textures = _document.Sections[s].Bank.Textures;
+            for (int t = 0; t < textures.Count; t++)
+            {
+                var type = textures[t].Header.Type;
+                if (type.Is3D() || type.IsCube()) continue;
+                UiTestSelectTexture(s, t);
+                return $"#{textures[t].Index} {type.Describe()}";
+            }
+        }
+        return "none";
+    }
+
     internal string UiTestPasteHash(string text)
     {
         if (_selected is null) return "no texture";
