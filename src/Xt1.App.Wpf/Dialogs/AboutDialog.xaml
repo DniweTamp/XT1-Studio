@@ -2,7 +2,7 @@
                       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                       xmlns:dialogs="clr-namespace:Xt1.App.Wpf.Dialogs"
-                      Title="About" Width="460" Height="300" ResizeMode="NoResize"
+                      Title="About XT1 Studio" Width="520" Height="340" ResizeMode="NoResize"
                       Background="{DynamicResource Brush.Window}">
     <Grid>
         <Grid.RowDefinitions>
@@ -10,19 +10,32 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Margin="24,20,24,0">
-            <TextBlock Style="{StaticResource DialogTitle}" Text="XT1 Studio" />
-            <TextBlock x:Name="VersionText" Style="{StaticResource DialogHint}" Margin="0,4,0,0" />
-            <TextBlock Text="Viewer/editor for PlatinumGames WTB/XT1 texture banks." TextWrapping="Wrap"
-                       Margin="0,18,0,0" />
-            <TextBlock Text="Format reference: XT1_FORMAT.md" TextWrapping="Wrap" Margin="0,14,0,0" />
-        </StackPanel>
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" Margin="24,20,24,16">
+            <StackPanel>
+                <TextBlock Style="{StaticResource DialogTitle}" Text="XT1 Studio" />
+                <TextBlock TextWrapping="Wrap" Margin="0,18,0,0"
+                           Text="XT1 Studio opens and edits PlatinumGames Bayonetta 3 WTB/XT1 texture banks — importing, exporting, adding, deleting and batch-recompressing textures, with 2D, cubemap and 3D volume previews." />
+                <TextBlock Style="{StaticResource DialogHint}" Margin="0,14,0,0"
+                           Text="3D textures are preview-only." />
+            </StackPanel>
+        </ScrollViewer>
 
         <Border Grid.Row="1" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="18,10">
-            <StackPanel Style="{StaticResource DialogButtonRow}">
-                <Button Style="{StaticResource PillButton}" Content="Close" IsDefault="True" IsCancel="True"
-                        MinWidth="84" />
-            </StackPanel>
+            <Grid>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
+                    <Ellipse Width="40" Height="40">
+                        <Ellipse.Fill>
+                            <ImageBrush ImageSource="pack://application:,,,/Assets/Author.png" Stretch="UniformToFill" />
+                        </Ellipse.Fill>
+                    </Ellipse>
+                    <TextBlock Style="{StaticResource DialogHint}" Text="DniweTamp"
+                               VerticalAlignment="Center" Margin="10,0,0,0" />
+                </StackPanel>
+                <StackPanel Style="{StaticResource DialogButtonRow}" VerticalAlignment="Center">
+                    <Button Style="{StaticResource PillButton}" Content="Close" IsDefault="True" IsCancel="True"
+                            MinWidth="84" />
+                </StackPanel>
+            </Grid>
         </Border>
     </Grid>
 </dialogs:ThemedDialog>
