@@ -66,7 +66,7 @@ public partial class MainWindow : Window
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
     }
 
-    private static readonly string[] OpenableExtensions = { ".dat", ".wta", ".wtb", ".xt1" };
+    private static readonly string[] OpenableExtensions = BankFileScan.Extensions;
 
     private const string RawReadOnlyTip =
         "Raw .xt1 payloads are read-only until the editing pipeline is ported.";
@@ -436,7 +436,14 @@ public partial class MainWindow : Window
     private static bool IsStructural(string? commandName) =>
         commandName is "Delete texture" or "Add texture";
 
-    private void OnMenuExportContainer(object sender, RoutedEventArgs e) => ExportContainerTextures();
+    private void OnMenuExportContainer(object sender, RoutedEventArgs e) =>
+        ExportContainerTextures(FormatFromTag(sender));
+
+    /// <summary>The export format carried by a menu item's <c>Tag</c> ("png"/"dds"/"xt1").</summary>
+    private static TextureExportFormat FormatFromTag(object sender) =>
+        sender is MenuItem { Tag: string tag } && TextureExport.TryParse(tag, out var format)
+            ? format
+            : TextureExportFormat.Png;
 
     private void OnMenuAbout(object sender, RoutedEventArgs e)
     {
@@ -530,6 +537,24 @@ public partial class MainWindow : Window
             }
 
             _recompressor.RunOnFiles(request.Files, request.Options, progress, token);
+        }, token);
+
+    private void OnMenuExportFolder(object sender, RoutedEventArgs e)
+    {
+        var dialog = new ExportTexturesDialog(RunExportTexturesAsync) { Owner = this };
+        dialog.ShowDialog();
+    }
+
+    private Task RunExportTexturesAsync(ExportTexturesRequest request, IProgress<string> progress,
+        CancellationToken token) =>
+        Task.Run(() =>
+        {
+            var options = new FolderExportOptions(
+                request.Format, request.SourceRoot, request.OutputFolder, request.SubfolderPerBank);
+            var stats = new TextureFolderExporter().Run(request.Files, options, progress, token);
+            progress.Report(
+                $"exported {stats.Written} of {stats.Textures} texture(s) from {stats.Files} file(s)" +
+                (stats.Skipped > 0 ? $", skipped {stats.Skipped}" : string.Empty));
         }, token);
 
     /// <summary>Copy every field of the dialog result onto the live settings object.</summary>
@@ -1888,15 +1913,17 @@ public partial class MainWindow : Window
             return;
         }
 
+        var format = FormatFromTag(sender);
         var picker = new OpenFolderDialog { Title = $"Choose an output folder for {section.Label}" };
         if (picker.ShowDialog(this) != true) return;
 
+        string extension = TextureExport.Extension(format);
         var textures = section.Bank.Textures.ToList();
-        await ExportTexturesAsync(textures, picker.FolderName, section.Label,
-            texture => $"tex{texture.Index}_0x{texture.EffectiveHash():X8}.png");
+        await ExportTexturesAsync(textures, picker.FolderName, section.Label, format,
+            texture => $"tex{texture.Index}_0x{texture.EffectiveHash():X8}{extension}");
     }
 
-    private async void ExportContainerTextures()
+    private async void ExportContainerTextures(TextureExportFormat format)
     {
         if (_document is null) return;
 
@@ -1911,12 +1938,13 @@ public partial class MainWindow : Window
         }
 
         string stem = Path.GetFileNameWithoutExtension(_document.FilePath ?? "container");
-        await ExportTexturesAsync(textures, picker.FolderName, "container",
-            texture => $"{stem}_tex{texture.Index}_0x{texture.EffectiveHash():X8}.png");
+        string extension = TextureExport.Extension(format);
+        await ExportTexturesAsync(textures, picker.FolderName, "container", format,
+            texture => $"{stem}_tex{texture.Index}_0x{texture.EffectiveHash():X8}{extension}");
     }
 
     private async Task ExportTexturesAsync(IReadOnlyList<EditableTexture> textures, string folder,
-        string what, Func<EditableTexture, string> fileName)
+        string what, TextureExportFormat format, Func<EditableTexture, string> fileName)
     {
         _exportCts?.Cancel();
         _exportCts?.Dispose();
@@ -1934,23 +1962,10 @@ public partial class MainWindow : Window
                 foreach (var texture in textures)
                 {
                     token.ThrowIfCancellationRequested();
-                    if (!TextureCodec.CanDecode(texture.FormatInfo))
-                    {
-                        failed++;
-                    }
+                    if (TextureExport.TryWrite(texture, format, Path.Combine(folder, fileName(texture)), out _))
+                        ok++;
                     else
-                    {
-                        var image = TextureCodec.Decode(texture, 0, 0, 0, out _);
-                        if (image is null)
-                        {
-                            failed++;
-                        }
-                        else
-                        {
-                            ImageIo.Save(image, Path.Combine(folder, fileName(texture)));
-                            ok++;
-                        }
-                    }
+                        failed++;
 
                     if (++done % 16 == 0) progress.Report(done);
                 }
@@ -1959,8 +1974,9 @@ public partial class MainWindow : Window
                 return (ok, failed);
             }, token);
 
-            StatusLeft.Text = $"Exported {exported} texture(s) from {what}" +
-                              (skipped == 0 ? "." : $", skipped {skipped} that could not be decoded.");
+            string kind = TextureExport.Extension(format).TrimStart('.').ToUpperInvariant();
+            StatusLeft.Text = $"Exported {exported} {kind} texture(s) from {what}" +
+                              (skipped == 0 ? "." : $", skipped {skipped} that could not be written.");
         }
         catch (OperationCanceledException)
         {

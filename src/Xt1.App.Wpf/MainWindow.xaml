@@ -40,7 +40,11 @@
                             <MenuItem x:Name="UndoMenuItem" Header="Undo" Click="OnMenuUndo" InputGestureText="Ctrl+Z" IsEnabled="False" />
                             <MenuItem x:Name="RedoMenuItem" Header="Redo" Click="OnMenuRedo" InputGestureText="Ctrl+Y" IsEnabled="False" />
                             <Separator Style="{StaticResource MenuSeparator}" />
-                            <MenuItem Header="Export every texture in this container (PNG folder)..." Click="OnMenuExportContainer" />
+                            <MenuItem x:Name="MenuExportContainer" Header="Export every texture in this container">
+                                <MenuItem Header="As PNG folder..." Tag="png" Click="OnMenuExportContainer" />
+                                <MenuItem Header="As DDS folder..." Tag="dds" Click="OnMenuExportContainer" />
+                                <MenuItem Header="As XT1 folder..." Tag="xt1" Click="OnMenuExportContainer" />
+                            </MenuItem>
                         </ContextMenu>
                     </Button.ContextMenu>
                 </Button>
@@ -48,6 +52,8 @@
                     <Button.ContextMenu>
                         <ContextMenu>
                             <MenuItem Header="Settings..." Click="OnMenuSettings" />
+                            <MenuItem Header="Export textures from folder..." Click="OnMenuExportFolder"
+                                      ToolTip="Export every texture in a folder of banks to PNG, DDS or raw XT1 files" />
                             <MenuItem Header="Batch recompress (ASTC to BC)..." Click="OnMenuBatchRecompress"
                                       ToolTip="Recompress the loaded document, or every bank in a folder, from ASTC to BC" />
                         </ContextMenu>
@@ -162,8 +168,11 @@
                                     <Separator Style="{StaticResource MenuSeparator}" />
                                     <MenuItem x:Name="TreeMenuCopyHash" Header="Copy hash" Click="OnTreeCopyHash" />
                                     <Separator Style="{StaticResource MenuSeparator}" />
-                                    <MenuItem x:Name="TreeMenuExportBank" Header="Export every texture in this bank (PNG folder)..."
-                                              Click="OnTreeExportBank" />
+                                    <MenuItem x:Name="TreeMenuExportBank" Header="Export every texture in this bank">
+                                        <MenuItem Header="As PNG folder..." Tag="png" Click="OnTreeExportBank" />
+                                        <MenuItem Header="As DDS folder..." Tag="dds" Click="OnTreeExportBank" />
+                                        <MenuItem Header="As XT1 folder..." Tag="xt1" Click="OnTreeExportBank" />
+                                    </MenuItem>
                                 </ContextMenu>
                             </TreeView.ContextMenu>
                         </TreeView>

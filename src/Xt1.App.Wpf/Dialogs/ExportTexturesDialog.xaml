@@ -1,0 +1,137 @@
+<dialogs:ThemedDialog x:Class="Xt1.App.Wpf.Dialogs.ExportTexturesDialog"
+                      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                      xmlns:dialogs="clr-namespace:Xt1.App.Wpf.Dialogs"
+                      Title="Export textures from folder" Width="1040" Height="720" MinWidth="1000" MinHeight="620"
+                      Background="{DynamicResource Brush.Window}">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Three option cards (source / destination / format) sharing one row so they match height. -->
+        <Grid Grid.Row="0" Margin="18,16,18,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Style="{StaticResource Card}" Margin="0,0,10,0">
+                <StackPanel Margin="14,12,14,14">
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="1. Source" Margin="0,0,0,12" />
+
+                    <TextBlock Text="Source Folder" Foreground="{DynamicResource Brush.Muted}" Margin="0,0,0,4" />
+                    <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="SourceBox" Grid.Column="0" Style="{StaticResource FieldBox}" />
+                        <Button x:Name="SourceBrowse" Grid.Column="1" Style="{StaticResource PillButton}"
+                                Margin="8,0,0,0" Click="OnBrowseSource" ToolTip="Browse for a folder">
+                            <TextBlock Style="{StaticResource IconText}" Text="&#xE838;" />
+                        </Button>
+                    </Grid>
+
+                    <CheckBox x:Name="RecursiveCheck" Style="{StaticResource PillCheckBox}"
+                              Content="Include subfolders (recursive)" Margin="0,0,0,12" />
+
+                    <TextBlock Style="{StaticResource DialogHint}"
+                               Text="Scans .dat/.wta/.wtb/.xt1, pairing each bank's .dtt/.wtp payload automatically." />
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Column="1" Style="{StaticResource Card}" Margin="0,0,10,0">
+                <StackPanel Margin="14,12,14,14">
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="2. Destination" Margin="0,0,0,12" />
+
+                    <TextBlock Text="Output Folder" Foreground="{DynamicResource Brush.Muted}" Margin="0,0,0,4" />
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="OutputBox" Grid.Column="0" Style="{StaticResource FieldBox}" />
+                        <Button x:Name="OutputBrowse" Grid.Column="1" Style="{StaticResource PillButton}"
+                                Margin="8,0,0,0" Click="OnBrowseOutput" ToolTip="Browse for a folder">
+                            <TextBlock Style="{StaticResource IconText}" Text="&#xE838;" />
+                        </Button>
+                    </Grid>
+
+                    <!-- Fieldset: the caption sits on the border line, masking it with the card colour. -->
+                    <Grid>
+                        <Border BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1" CornerRadius="8"
+                                Margin="0,7,0,0" Padding="12,14,12,12">
+                            <StackPanel>
+                                <RadioButton x:Name="FlatRadio" Style="{StaticResource DialogRadio}"
+                                             Content="One folder for everything" />
+                                <RadioButton x:Name="PerBankRadio" Style="{StaticResource DialogRadio}"
+                                             Content="Subfolder per bank" Margin="0,6,0,0" />
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Text="Output Layout" Foreground="{DynamicResource Brush.Muted}" FontSize="11.5"
+                                   Background="{DynamicResource Brush.Card}" Padding="5,0" Margin="11,0,0,0"
+                                   HorizontalAlignment="Left" VerticalAlignment="Top" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <Border Grid.Column="2" Style="{StaticResource Card}">
+                <StackPanel Margin="14,12,14,14">
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="3. Format" Margin="0,0,0,12" />
+
+                    <TextBlock Text="File Format" Foreground="{DynamicResource Brush.Muted}" Margin="0,0,0,4" />
+                    <ComboBox x:Name="FormatCombo" Style="{StaticResource PillComboBox}"
+                              HorizontalAlignment="Stretch" Margin="0,0,0,10"
+                              SelectionChanged="OnFormatChanged" />
+
+                    <TextBlock x:Name="FormatHint" Style="{StaticResource DialogHint}" />
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <Border Grid.Row="1" Style="{StaticResource Card}" Margin="18,12,18,0">
+            <Grid Margin="14,12,14,14">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Style="{StaticResource SectionHeader}" Text="Export Log"
+                           Margin="0,0,0,10" />
+                <TextBox x:Name="LogBox" Grid.Row="1" Style="{StaticResource FieldBox}" IsReadOnly="True"
+                         AcceptsReturn="True" FontFamily="Consolas" FontSize="12" TextWrapping="NoWrap"
+                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                         ToolTip="Progress log for the running export" />
+            </Grid>
+        </Border>
+
+        <!-- Themed busy sweep: a clipped accent block, so no stock progress chrome appears in dark mode. -->
+        <Border x:Name="BusyBar" Grid.Row="2" Height="3" Margin="18,10,18,0" ClipToBounds="True"
+                Background="{DynamicResource Brush.Input}" Visibility="Collapsed">
+            <Rectangle x:Name="BusyBlock" Width="140" HorizontalAlignment="Left"
+                       Fill="{DynamicResource Brush.Accent}">
+                <Rectangle.RenderTransform>
+                    <TranslateTransform x:Name="BusyShift" X="-140" />
+                </Rectangle.RenderTransform>
+            </Rectangle>
+        </Border>
+
+        <Grid Grid.Row="3" Margin="18,8,18,14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="RunStatus" Grid.Column="0" VerticalAlignment="Center"
+                       Foreground="{DynamicResource Brush.Muted}" TextTrimming="CharacterEllipsis" />
+            <Button x:Name="RunButton" Grid.Column="1" Style="{StaticResource PillButton}" Content="Export" MinWidth="96"
+                    Click="OnRun" />
+            <Button Grid.Column="2" Style="{StaticResource PillButton}" Content="Close" MinWidth="96" Margin="8,0,0,0"
+                    IsCancel="True" Click="OnClose" />
+        </Grid>
+    </Grid>
+</dialogs:ThemedDialog>

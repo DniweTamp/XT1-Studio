@@ -124,7 +124,7 @@ internal static class FileCli
         if (positional.Count < 2) { Usage(log); return 2; }
 
         string asKind = (CliOptions.Get(options, "--as") ?? "png").ToLowerInvariant();
-        if (asKind is not ("png" or "dds" or "xt1"))
+        if (!TextureExport.TryParse(asKind, out var format))
         {
             log($"[error] unknown --as '{asKind}' (use png, dds or xt1)");
             return 2;
@@ -151,86 +151,47 @@ internal static class FileCli
         if (toDirectory && !dryRun) Directory.CreateDirectory(output);
 
         string stem = Path.GetFileNameWithoutExtension(document.FilePath ?? "texture");
+        string extension = TextureExport.Extension(format);
         int written = 0, skipped = 0;
         foreach (var target in targets)
         {
             var texture = target.Texture;
             string defaultName = $"{stem}_tex{texture.Index}_0x{texture.EffectiveHash():X8}";
-            try
+            string file = toDirectory ? Path.Combine(output, defaultName + extension) : output;
+
+            if (!TextureExport.CanExport(texture, format))
             {
-                switch (asKind)
-                {
-                    case "png":
-                    {
-                        if (!TextureCodec.CanDecode(texture.FormatInfo))
-                        {
-                            log($"  - #{texture.Index} {texture.FormatInfo?.Name ?? "unknown"}: no decoder");
-                            skipped++;
-                            continue;
-                        }
-
-                        var image = TextureCodec.Decode(texture, mip, face, slice, out var error);
-                        if (image is null)
-                        {
-                            log($"  x #{texture.Index}: {error}");
-                            skipped++;
-                            continue;
-                        }
-
-                        string file = toDirectory ? Path.Combine(output, defaultName + ".png") : output;
-                        if (dryRun)
-                        {
-                            log($"  (dry run) #{texture.Index} {texture.FormatInfo?.Name} {image.Width}x{image.Height} -> {file}");
-                        }
-                        else
-                        {
-                            ImageIo.Save(image, file);
-                            log($"  + #{texture.Index} {texture.FormatInfo?.Name} {image.Width}x{image.Height} -> {file}");
-                        }
-                        written++;
-                        break;
-                    }
-
-                    case "dds":
-                    {
-                        if (texture.FormatInfo is null || !DdsIo.CanExport(texture.FormatInfo))
-                        {
-                            log($"  - #{texture.Index} {texture.FormatInfo?.Name ?? "unknown"}: no DDS mapping");
-                            skipped++;
-                            continue;
-                        }
-
-                        string file = toDirectory ? Path.Combine(output, defaultName + ".dds") : output;
-                        if (dryRun) log($"  (dry run) #{texture.Index} {texture.FormatInfo.Name} -> {file}");
-                        else
-                        {
-                            File.WriteAllBytes(file, DdsExport.Build(texture));
-                            log($"  + #{texture.Index} {texture.FormatInfo.Name} -> {file}");
-                        }
-                        written++;
-                        break;
-                    }
-
-                    default:
-                    {
-                        string file = toDirectory ? Path.Combine(output, defaultName + ".xt1") : output;
-                        if (dryRun) log($"  (dry run) #{texture.Index} -> {file}");
-                        else
-                        {
-                            // trackOriginal would deep-clone the whole payload for dirty tracking that
-                            // is never read before the blob is written and discarded.
-                            File.WriteAllBytes(file,
-                                new RawXt1(texture.Header.Clone(), texture.Payload, trackOriginal: false).ToBytes());
-                            log($"  + #{texture.Index} -> {file}");
-                        }
-                        written++;
-                        break;
-                    }
-                }
+                log($"  - #{texture.Index} {texture.FormatInfo?.Name ?? "unknown"}: cannot export as " +
+                    extension.TrimStart('.'));
+                skipped++;
+                continue;
             }
-            catch (Exception ex)
+
+            if (dryRun)
             {
-                log($"  x #{texture.Index}: {ex.Message}");
+                // Dry-run must predict the real run, so validate without writing: PNG is decoded and
+                // DDS needs a usable layout, exactly the failures that would skip it for real.
+                if (!TextureExport.TryValidate(texture, format, out var dryError, mip, face, slice))
+                {
+                    log($"  x #{texture.Index}: {dryError}");
+                    skipped++;
+                }
+                else
+                {
+                    log($"  (dry run) #{texture.Index} {texture.FormatInfo?.Name} -> {file}");
+                    written++;
+                }
+                continue;
+            }
+
+            if (TextureExport.TryWrite(texture, format, file, out var error, mip, face, slice))
+            {
+                log($"  + #{texture.Index} {texture.FormatInfo?.Name} -> {file}");
+                written++;
+            }
+            else
+            {
+                log($"  x #{texture.Index}: {error}");
                 skipped++;
             }
         }

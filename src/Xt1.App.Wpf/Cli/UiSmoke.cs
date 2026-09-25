@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Threading;
+using Xt1.App.Wpf.Dialogs;
 using Xt1.Core.Settings;
 using Xt1.Core.Xt1;
 
@@ -148,8 +149,8 @@ internal static class UiSmoke
                     Step($"selected the bank node ({sectionNode})");
                     var bankMenu = window.UiTestTreeMenuItems();
                     Expect("the bank menu offers the bank export",
-                        bankMenu.Contains("Export every texture in this bank (PNG folder)...|enabled"),
-                        "Export every texture in this bank (PNG folder)...");
+                        bankMenu.Contains("Export every texture in this bank|enabled"),
+                        "Export every texture in this bank");
 
                     // The file browser lists every openable file in the folder, in sortable columns.
                     var files = window.UiTestFileListItems();
@@ -230,6 +231,23 @@ internal static class UiSmoke
                     Expect("applying settings keeps an encoder available",
                         window.UiTestBackendState.Length > 0, window.UiTestBackendState);
                     Step("settings applied");
+
+                    // The folder-export dialog: actually shown so its XAML and themed styles load.
+                    Step("--- export dialog ---");
+                    var exportDialog = new ExportTexturesDialog((_, _, _) => Task.CompletedTask)
+                    {
+                        Owner = window,
+                    };
+                    exportDialog.Show();
+                    Pump(20);
+                    var exportState = exportDialog.UiTestState();
+                    log($"       export dialog: {exportState}");
+                    Expect("the export dialog loads with the three formats",
+                        exportState.Contains("formats=3") && exportState.Contains("hint=True"), exportState);
+                    exportDialog.Close();
+                    Pump(10);
+                    Step("export dialog closed");
+
 
                     // The 3D viewport's shared controls, through the same selection path a user takes.
                     // The original bank is reloaded first, since the empty-bank phase replaced it.

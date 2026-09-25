@@ -301,8 +301,9 @@ tests/Xt1.Core.Tests      468 tests, real-file validation against D:\Bayonetta3\
 - Right-click menu in the container tree for the edit/export actions, so they sit where a texture is
   selected instead of in the menu bar: **Replace...** (an image is re-encoded through the import
   dialog; a `.dds` is copied in losslessly, mips included), **Replace with .xt1...**, an **Export**
-  submenu (`.png` / `.dds` / `.xt1`), add texture from image or DDS, delete texture, copy hash, and
-  the bank-level PNG export. Items are enabled per selection: DDS export only for formats that can be
+  submenu (`.png` / `.dds` / `.xt1`), add texture from image or DDS, delete texture, copy hash, and a
+  bank-level **Export every texture in this bank** submenu that writes the whole bank as a PNG, DDS or
+  raw XT1 folder. Items are enabled per selection: DDS export only for formats that can be
   written (including ASTC), bank actions only when a bank is loaded, and so on.
 - 2D viewer: pan/zoom, mip selection, R/G/B/A isolation, alpha checkerboard. For a 3D
   texture it shows the currently selected slice (with pan/zoom preserved while scrubbing), so one
@@ -352,10 +353,15 @@ tests/Xt1.Core.Tests      468 tests, real-file validation against D:\Bayonetta3\
   conversion second. The bundled NVTT CLI has no solidify switch, so this is the equivalent of its GUI's
   "Edge Pad (Solidify)" pass. Also: add/delete textures, per-texture export to PNG / DDS / raw `.xt1` (a DDS export of
 a 3D volume carries every depth slice of each level and writes `resourceDimension = TEXTURE3D`), and a bank- or
-  container-wide PNG export. All of it is in the tree's right-click menu.
+  container-wide PNG/DDS/XT1 export. All of it is in the tree's right-click menu.
 - **File → New empty bank...** authors a fresh `.wta`+`.wtp` (split bank, the layout most of the game
   uses) or standalone `.wtb` with no textures. An empty bank still enables *Add texture from image...*
   in the tree menu so it can be filled.
+- **Tools → Export textures from folder...**: writes every texture in a folder of
+  `.dat`/`.wta`/`.wtb`/`.xt1` banks to PNG, DDS or raw XT1, with an optional recursive scan. The output
+  is either one folder for everything (same-named banks get a numeric suffix) or one subfolder per bank
+  mirroring the source tree, and both the loaded document's container and a single bank branch offer the
+  same three formats from the tree menu.
 - **Tools → Batch recompress (ASTC to BC)**: re-encodes ASTC textures to a chosen format, keeping the
   existing mip levels (none are regenerated) and only touching textures that decode cleanly. Opaque and
   alpha/transparent textures can target different formats; the dropdowns list every encodable format
