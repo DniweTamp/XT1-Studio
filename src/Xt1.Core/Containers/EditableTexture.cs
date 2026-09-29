@@ -230,8 +230,14 @@ public sealed class EditableTexture
         return warnings;
     }
 
-    /// <summary>Create a brand-new 2D texture with valid constants, for adding to a bank.</summary>
-    public static EditableTexture CreateNew(Xt1Format format, uint width, uint height, uint layout = 1)
+    /// <summary>
+    /// Create a brand-new 2D texture with valid constants, for adding to a bank.
+    /// <paramref name="layout"/> defaults to the driver-derived block height for the given geometry
+    /// (the header's low three bits). The game reads that field as the surface's block height, so a
+    /// fresh record must advertise the canonical value rather than an arbitrary constant; pass an
+    /// explicit <paramref name="layout"/> only to reproduce a specific record's word.
+    /// </summary>
+    public static EditableTexture CreateNew(Xt1Format format, uint width, uint height, uint? layout = null)
     {
         var header = new Xt1Header();
         header.Magic = Xt1Header.MagicValue;
@@ -244,8 +250,15 @@ public sealed class EditableTexture
         header.Depth = 1;
         header.Type = TextureType.T2D;
         header.Format = format;
-        header.Layout = layout;
+        header.Layout = layout ?? DerivedLayout(format, height);
         return new EditableTexture(header, new byte[4], 0, 0, 0, Array.Empty<byte>());
+    }
+
+    /// <summary>Canonical blockHeightLog2 for a new surface, or 0 when the format is unknown.</summary>
+    private static uint DerivedLayout(Xt1Format format, uint height)
+    {
+        var info = FormatTable.Get(format);
+        return info is null ? 0u : (uint)GobSwizzle.BlockHeightLog2(info.HeightBlocks((int)height));
     }
 
     /// <summary>

@@ -275,23 +275,31 @@ def div_up(n, d):   return (n + d - 1) // d
 
 def surface_size(width, height, mip_count, layout, blk_w, blk_h, bytes_per_block):
     bhl   = layout & 7                 # blockHeightLog2 (see §10)
-    lpbh  = 8 << bhl
-    shift = 0
+    bh0   = 1 << bhl                   # mip 0 block height, in 8-row GOBs
     size  = 0
     for m in range(mip_count):
         w = max(1, width  >> m)
         h = max(1, height >> m)
         wb = div_up(w, blk_w)
         hb = div_up(h, blk_h)
-        if pow2_round_up(hb) < lpbh:   # small mips use a reduced block height
-            shift += 1
-        lines  = 8 * max(1, (1 << bhl) >> shift)
+        # Driver block-height reduction (Ryujinx AdjustTileSize / tegra_swizzle
+        # mip_block_height): halve the block height while the mip still fits the lower half.
+        bh = bh0
+        while hb <= (bh // 2) * 8 and bh > 1:
+            bh //= 2
+        lines  = 8 * bh
         pitch  = round_up(wb * bytes_per_block, 64)
         surface = pitch * round_up(hb, lines)
         size = round_up(size, 512)     # each mip starts 512-aligned
         size += surface
     return size
 ```
+
+> The per-mip `bh` must be the driver rule above, not a constant-threshold "shift": the two
+> coincide only for the sizes Bayonetta 3 ships, and diverge for arbitrary custom geometries
+> (e.g. a 130-block-tall mip). A texture swizzled with the wrong per-mip height round-trips in
+> the tool but deswizzles its lower mips wrong in the game, which is why the tool now ports
+> `block_height_mip0`/`mip_block_height` from `tegra_swizzle` directly.
 
 **[verified]** against data, e.g. (all reproduced exactly):
 
@@ -542,7 +550,7 @@ def get_addr_block_linear(x, y, width_blocks, bpp, base, block_height):
             + ((px % 32) // 16) * 32 + (y % 2) * 16 + (px % 16))
 ```
 
-* `block_height = 1 << blockHeightLog2`, reduced per mip by the shift in §6.
+* `block_height = 1 << blockHeightLog2` for mip 0, reduced per mip by the driver rule in §6.
 * Iterate `y in [0,hb)`, `x in [0,wb)`, and move `bpp` bytes between linear
   `(y*wb + x)*bpp` and `get_addr_block_linear(x, y, wb, bpp, 0, block_height)`.
 * Only **block-linear (tileMode 0)** is used; the pitch-linear path is not needed.
@@ -662,7 +670,8 @@ def get_addr_block_linear(x, y, width_blocks, bpp, base, block_height):
 6. **`imageSize` is the block-linear total**, not `w*h*bpp`; it includes GOB padding, the
    512-per-mip alignment, the 1024 row pitch when `tile_width_spacing = 4` applies (§6), and 4096
    per cube face when the face's base mip reaches a page.
-7. **Per-mip block-height shift.** Without it the sizes and low-mip swizzle are wrong.
+7. **Per-mip block-height reduction** (the driver rule in §6; a constant-threshold "shift" is
+   wrong off the shipped sizes). Without it the sizes and low-mip swizzle are wrong.
 8. **The hash table (`0x18`) is real** and is `crc32(name) & 0x7FFFFFFF` (LE). It is absent in
    effect banks (`0x18 == 0`) and present in model/UI banks; materials bind textures by it.
 9. **table2 is a 4-byte flag field**: `b0` = bank class, and `b3` = `0x60` base plus

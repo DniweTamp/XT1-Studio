@@ -1,3 +1,4 @@
+using Xt1.Core.Containers;
 using Xt1.Core.Format;
 using Xt1.Core.Xt1;
 using Xunit;
@@ -307,6 +308,41 @@ public class LayoutTests
         Assert.False(result.PitchRecoveredFromStoredSize);
         Assert.False(result.SizeMatches);
         Assert.All(result.Mips, m => Assert.True(m.SliceSurfaceSize >= 0));
-        Assert.Equal(2048, result.Mips[0].SliceSurfaceSize);
+        // Block height 8 (header 0x403) reduces to 1 for a one-block mip, so the surface is
+        // 64-byte pitch * 8 padded rows.
+        Assert.Equal(512, result.Mips[0].SliceSurfaceSize);
+    }
+
+    /// <summary>
+    /// Custom geometries must use the driver's per-mip block-height reduction, not the constant-
+    /// threshold "shift" heuristic that only coincided with the driver on the sizes Bayonetta 3
+    /// ships. RGBA8 4x130 has block rows 130,65,32,16,8,4,2,1 and a driver sequence of
+    /// 16,16,4,2,1,1,1,1 (the old heuristic gave 16,16,8,4,2,1,1,1). Such a texture round-tripped
+    /// in the tool but deswizzled its lower mips wrong in the game.
+    /// </summary>
+    [Fact]
+    public void CustomGeometry_UsesTheDriverMipBlockHeightReduction()
+    {
+        var result = SurfaceLayout.Compute(4, 130, 1, 8, TextureType.T2D, 0x4,
+            FormatTable.Get(Xt1Format.Rgba8Unorm), storedImageSize: 0);
+
+        Assert.True(result.Applicable);
+        Assert.Equal(new[] { 16, 16, 4, 2, 1, 1, 1, 1 },
+            result.Mips.Select(m => m.BlockHeight).ToArray());
+    }
+
+    /// <summary>
+    /// A brand-new surface must advertise the driver-derived mip-0 block height in the header's low
+    /// three bits, so the game builds a descriptor that matches the swizzled payload. An explicit
+    /// word (e.g. a tile_width_spacing = 4 record) is still preserved.
+    /// </summary>
+    [Fact]
+    public void CreateNew_DerivesTheCanonicalBlockHeightLog2()
+    {
+        Assert.Equal(2, EditableTexture.CreateNew(Xt1Format.Astc8x8Unorm, 256, 256).Header.BlockHeightLog2);
+        Assert.Equal(1, EditableTexture.CreateNew(Xt1Format.Bc3Unorm, 64, 64).Header.BlockHeightLog2);
+        Assert.Equal(0, EditableTexture.CreateNew(Xt1Format.AfL8Unorm, 8, 8).Header.BlockHeightLog2);
+        Assert.Equal(3, EditableTexture.CreateNew(Xt1Format.Astc6x6Unorm, 1024, 1024, layout: 0x403)
+            .Header.BlockHeightLog2);
     }
 }

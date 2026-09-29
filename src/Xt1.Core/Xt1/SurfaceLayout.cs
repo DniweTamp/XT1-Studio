@@ -250,8 +250,10 @@ public static class SurfaceLayout
         // The mip chain, optionally forcing a row pitch (used by the recovery above).
         List<MipInfo> BuildMips(int? pitchOverride, out long cursorOut, out long faceSizeOut, out bool wideOut)
         {
-            int lpbh = 8 << blkLog2;
-            int shift = 0;
+            // Mip 0's block height comes from the header's low three bits. 3D surfaces always use 1
+            // (the driver forces BlockHeight::One for volumes); every later mip halves it exactly as
+            // the driver/Ryujinx/tegra_swizzle do.
+            int blockHeightMip0 = is3D ? 1 : Math.Max(1, 1 << blkLog2);
             long cursor = 0;
             bool anyWideApplied = false;
             var list = new List<MipInfo>(mips);
@@ -265,10 +267,7 @@ public static class SurfaceLayout
                 int wb = Mem.DivUp(w, fmt.BlockWidth);
                 int hb = Mem.DivUp(h, fmt.BlockHeight);
 
-                if (Mem.Pow2RoundUp(hb) < lpbh)
-                    shift++;
-
-                int lines = 8 * Math.Max(1, (1 << blkLog2) >> shift);
+                int lines = 8 * GobSwizzle.MipBlockHeight(hb, blockHeightMip0);
 
                 // yuzu's IsSmallerThanGobSize gate: the width term is in bytes, the height term in
                 // rows and the depth term (3D only) in slices. A record with tile_width_spacing = 4

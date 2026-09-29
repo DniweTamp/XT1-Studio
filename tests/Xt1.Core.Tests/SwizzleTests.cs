@@ -74,4 +74,34 @@ public class SwizzleTests
                 Assert.InRange(offset, 0, 511);
             }
     }
+
+    [Fact]
+    public void BlockHeightMip0_MatchesTheDriverRule()
+    {
+        Assert.Equal(1, GobSwizzle.BlockHeightMip0(1));
+        Assert.Equal(1, GobSwizzle.BlockHeightMip0(10));
+        Assert.Equal(2, GobSwizzle.BlockHeightMip0(11));
+        Assert.Equal(2, GobSwizzle.BlockHeightMip0(21));
+        Assert.Equal(4, GobSwizzle.BlockHeightMip0(22));
+        Assert.Equal(4, GobSwizzle.BlockHeightMip0(42));
+        Assert.Equal(8, GobSwizzle.BlockHeightMip0(43));
+        Assert.Equal(8, GobSwizzle.BlockHeightMip0(85));
+        Assert.Equal(16, GobSwizzle.BlockHeightMip0(86));
+        Assert.Equal(16, GobSwizzle.BlockHeightMip0(130));
+    }
+
+    [Fact]
+    public void MipBlockHeight_HalvesWhileTheMipFitsTheLowerHalf()
+    {
+        // The driver (Ryujinx AdjustTileSize / tegra_swizzle mip_block_height) reduces while
+        // heightBlocks <= blockHeight * 4; the old shift heuristic used a constant threshold and
+        // diverged here, which is what broke custom geometries.
+        Assert.Equal(16, GobSwizzle.MipBlockHeight(130, 16));
+        Assert.Equal(16, GobSwizzle.MipBlockHeight(65, 16));
+        Assert.Equal(8, GobSwizzle.MipBlockHeight(64, 16));
+        Assert.Equal(4, GobSwizzle.MipBlockHeight(32, 16));
+        Assert.Equal(2, GobSwizzle.MipBlockHeight(16, 16));
+        Assert.Equal(1, GobSwizzle.MipBlockHeight(8, 16));
+        Assert.Equal(1, GobSwizzle.MipBlockHeight(1, 8));
+    }
 }

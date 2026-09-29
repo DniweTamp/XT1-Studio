@@ -42,6 +42,48 @@ public static class GobSwizzle
         return gobDepth;
     }
 
+    /// <summary>
+    /// Block height in 8-row GOBs for mip 0, from that mip's height in <b>blocks</b>: the driver
+    /// rule ported by Ryujinx and the <c>tegra_swizzle</c> crate (<c>block_height_mip0</c>). This is
+    /// the value the header's low three bits should hold, so it is the canonical
+    /// <c>blockHeightLog2</c> for a fresh surface.
+    /// </summary>
+    public static int BlockHeightMip0(int heightBlocks)
+    {
+        int heightAndHalf = heightBlocks + heightBlocks / 2;
+        if (heightAndHalf >= 128) return 16;
+        if (heightAndHalf >= 64) return 8;
+        if (heightAndHalf >= 32) return 4;
+        if (heightAndHalf >= 16) return 2;
+        return 1;
+    }
+
+    /// <summary>log2 of <see cref="BlockHeightMip0"/>, i.e. the canonical header blockHeightLog2.</summary>
+    public static int BlockHeightLog2(int heightBlocks) => BlockHeightMip0(heightBlocks) switch
+    {
+        16 => 4,
+        8 => 3,
+        4 => 2,
+        2 => 1,
+        _ => 0,
+    };
+
+    /// <summary>
+    /// Block height in GOBs for a mip whose height in blocks is <paramref name="heightBlocks"/>,
+    /// given mip 0's block height. Halves the block height while the mip still fits in the lower
+    /// half of the current block, exactly as the driver does (Ryujinx <c>AdjustTileSize</c> /
+    /// <c>tegra_swizzle::mip_block_height</c>). The earlier hand-rolled "shift" heuristic agreed
+    /// with this only for the sizes the game happens to ship and diverged for arbitrary custom
+    /// geometries, which is why such textures round-tripped in the tool but failed in the game.
+    /// </summary>
+    public static int MipBlockHeight(int heightBlocks, int blockHeightMip0)
+    {
+        int blockHeight = blockHeightMip0 < 1 ? 1 : blockHeightMip0;
+        while (heightBlocks <= blockHeight / 2 * GobHeightInBytes && blockHeight > 1)
+            blockHeight /= 2;
+        return blockHeight;
+    }
+
     /// <summary>Byte offset of the first byte of block (x, y) inside one slice of a 2D surface.</summary>
     public static int BlockLinearOffset(int x, int y, int widthBlocks, int bytesPerBlock, int blockHeight)
     {
