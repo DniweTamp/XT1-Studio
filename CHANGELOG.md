@@ -44,6 +44,18 @@ table and every other texture are carried over byte-for-byte. The Bayonetta 3 XT
 richer interactive editor (`Containers/WtbBank.cs`, `EditableTexture`); the two share
 `Util/Mem`, the masked-CRC32 hash and the table walk rather than duplicating loop logic.
 
+### API additions used by the mod manager
+
+* `WtbBank.BuildSplit(streamBase)` rebuilds a split bank after a texture's header and payload are
+  replaced: it recomputes `table0` (4096-aligned) and returns the paired payload stream.
+* `TextureBank.HasMagic` and `TextureBank.Detect` expose bank detection to callers.
+* `EditableTexture.Header.Raw` remains the mutable 0x38-byte buffer an importer writes into.
+
+### Fixes
+
+* DAT: when the hash-map offset (header word 0x18) is 0 (Bayonetta 1 PC has no member hash map),
+  the "extra blob" no longer swallows the whole header, which had corrupted any structural rebuild.
+
 ### Other projects
 
 None needed. `Xt1Tool.Wpf` (and the rest of `Xt1Tool.sln`) build and pass unchanged: the only API
