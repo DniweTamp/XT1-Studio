@@ -1,8 +1,9 @@
 namespace Xt1.Core.Tests;
 
-/// <summary>Paths to the real Bayonetta 3 golden samples. Tests skip silently when absent.</summary>
+/// <summary>Paths to the real golden samples. Tests skip silently when absent.</summary>
 public static class TestPaths
 {
+    // ---- Bayonetta 3 (Switch, romfs pkz extracted to loose files) ----
     public const string Romfs = @"D:\Bayonetta3\romfs";
 
     public static string Pl0080Dat => Path.Combine(Romfs, "pl", "pl0080.dat");
@@ -34,6 +35,17 @@ public static class TestPaths
 
     /// <summary>A `.dtt` whose only banks are `"wtb"` sub-files plus one `"wta"`.</summary>
     public static string Z5000Dtt => Path.Combine(Romfs, "st5", "z5000.dtt");
+
+    // ---- Bayonetta 1 (PC) ----
+    public const string B1Root = @"D:\SteamLibrary\steamapps\common\Bayonetta";
+    public static string B1CoreDat => Path.Combine(B1Root, "extracted", "core.dat");
+    public static string B1PlDat => Path.Combine(B1Root, "extracted", "pl", "pl0000.dat");
+
+    // ---- Bayonetta 2 (Wii U, content cpks extracted to the `dump` folder) ----
+    public const string B2WuDump = @"D:\Roms\Wii U\Bayonetta 2\dump";
+    public static string B2WuWp0020Dat => Path.Combine(B2WuDump, "wp", "wp0020.dat");
+    public static string B2WuWp0020Wta => Path.Combine(B2WuDump, "wp", "wp0020_dat", "wp0020.wta");
+    public static string B2WuPl022eDat => Path.Combine(B2WuDump, "pl", "pl022e.dat");
 
     public static bool Exists(string path) => File.Exists(path);
 }

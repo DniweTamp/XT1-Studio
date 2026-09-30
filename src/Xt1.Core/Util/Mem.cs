@@ -2,6 +2,14 @@ using System.Buffers.Binary;
 
 namespace Xt1.Core.Util;
 
+/// <summary>Byte order of a container. PlatinumGames PC/Switch data is little-endian, the
+/// Wii U (PowerPC) ports are big-endian. XT1 headers themselves are always little-endian.</summary>
+public enum ByteOrder
+{
+    Little,
+    Big,
+}
+
 /// <summary>Little/big-endian read/write helpers over spans. All XT1 structures are
 /// little-endian except the WTB <c>table2</c> flag bytes, which are stored big-endian.</summary>
 public static class Mem
@@ -23,6 +31,50 @@ public static class Mem
 
     public static void WriteU32BE(Span<byte> b, int offset, uint value) =>
         BinaryPrimitives.WriteUInt32BigEndian(b.Slice(offset, 4), value);
+
+    // ---- order-parameterised helpers (DAT/WTB containers; see ByteOrder) ----
+
+    public static uint ReadU32(ReadOnlySpan<byte> b, int offset, ByteOrder order) =>
+        order == ByteOrder.Little ? ReadU32LE(b, offset) : ReadU32BE(b, offset);
+
+    public static ulong ReadU64(ReadOnlySpan<byte> b, int offset, ByteOrder order) =>
+        order == ByteOrder.Little
+            ? BinaryPrimitives.ReadUInt64LittleEndian(b.Slice(offset, 8))
+            : BinaryPrimitives.ReadUInt64BigEndian(b.Slice(offset, 8));
+
+    public static ushort ReadU16(ReadOnlySpan<byte> b, int offset, ByteOrder order) =>
+        order == ByteOrder.Little
+            ? BinaryPrimitives.ReadUInt16LittleEndian(b.Slice(offset, 2))
+            : BinaryPrimitives.ReadUInt16BigEndian(b.Slice(offset, 2));
+
+    public static short ReadI16(ReadOnlySpan<byte> b, int offset, ByteOrder order) =>
+        order == ByteOrder.Little
+            ? BinaryPrimitives.ReadInt16LittleEndian(b.Slice(offset, 2))
+            : BinaryPrimitives.ReadInt16BigEndian(b.Slice(offset, 2));
+
+    public static void WriteU32(Span<byte> b, int offset, uint value, ByteOrder order)
+    {
+        if (order == ByteOrder.Little) WriteU32LE(b, offset, value);
+        else WriteU32BE(b, offset, value);
+    }
+
+    public static void WriteU64(Span<byte> b, int offset, ulong value, ByteOrder order)
+    {
+        if (order == ByteOrder.Little) WriteU64LE(b, offset, value);
+        else BinaryPrimitives.WriteUInt64BigEndian(b.Slice(offset, 8), value);
+    }
+
+    public static void WriteU16(Span<byte> b, int offset, ushort value, ByteOrder order)
+    {
+        if (order == ByteOrder.Little) BinaryPrimitives.WriteUInt16LittleEndian(b.Slice(offset, 2), value);
+        else BinaryPrimitives.WriteUInt16BigEndian(b.Slice(offset, 2), value);
+    }
+
+    public static void WriteI16(Span<byte> b, int offset, short value, ByteOrder order)
+    {
+        if (order == ByteOrder.Little) BinaryPrimitives.WriteInt16LittleEndian(b.Slice(offset, 2), value);
+        else BinaryPrimitives.WriteInt16BigEndian(b.Slice(offset, 2), value);
+    }
 
     public static uint Magic(char a, char b, char c, char d) =>
         (uint)a | ((uint)b << 8) | ((uint)c << 16) | ((uint)d << 24);

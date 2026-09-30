@@ -118,16 +118,26 @@ public sealed class DatSubFile
 /// </summary>
 public sealed class DatFile
 {
-    /// <summary>"DAT\0" little-endian.</summary>
+    /// <summary>"DAT\0" as a little-endian word (kept for existing callers).</summary>
     public const uint MagicValue = 0x00544144;
 
     private static readonly System.Text.Encoding Text8 = System.Text.Encoding.Latin1;
 
     private readonly List<DatSubFile> _subFiles;
     private readonly byte[] _originalFileBytes;
+    private readonly string[] _originalNames;
     private bool _structureDirty;
 
-    /// <summary>Opaque metadata table that is preserved byte-for-byte.</summary>
+    /// <summary>Byte order of this container. Bayonetta 1 (PC) / Bayonetta 2 (Switch) / Bayonetta 3
+    /// are little-endian; Bayonetta 2 (Wii U) is big-endian.</summary>
+    public ByteOrder ByteOrder { get; private set; } = ByteOrder.Little;
+
+    /// <summary>The parsed <c>off_hash_map</c> table (header word 0x18), or null when absent
+    /// (e.g. Bayonetta 1 PC DATs, which carry no member hash table).</summary>
+    public DatHashMap? HashMap { get; set; }
+
+    /// <summary>Opaque metadata table that is preserved byte-for-byte when the member set is
+    /// unchanged. It holds the hash map plus any padding up to the first sub-file.</summary>
     public byte[] ExtraBlob { get; set; } = Array.Empty<byte>();
 
     /// <summary>Offset of the first sub-file (base of the data region).</summary>
@@ -145,10 +155,11 @@ public sealed class DatFile
     /// <summary>Header word at 0x1C, always 0 in observed files; preserved and editable.</summary>
     public uint HeaderWord1C { get; set; }
 
-    private DatFile(List<DatSubFile> subFiles, byte[] originalFileBytes)
+    private DatFile(List<DatSubFile> subFiles, byte[] originalFileBytes, string[] originalNames)
     {
         _subFiles = subFiles;
         _originalFileBytes = originalFileBytes;
+        _originalNames = originalNames;
     }
 
     public IReadOnlyList<DatSubFile> SubFiles => _subFiles;
@@ -175,6 +186,66 @@ public sealed class DatFile
                 yield return sf;
     }
 
+    /// <summary>Member names in order (used to rebuild the hash map when the member set changes).</summary>
+    public IReadOnlyList<string> Names => _subFiles.Select(s => s.Name).ToList();
+
+    /// <summary>
+    /// Per-member alignment (bytes) applied when the data region is repacked after a structural
+    /// edit, keyed by lower-case name extension or 4-character tag. Members that are not moved keep
+    /// their original offset, so alignment only matters on the rebuild path.
+    /// </summary>
+    public Dictionary<string, int> Alignment { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Alignment used for extensions not present in <see cref="Alignment"/>.</summary>
+    public int DefaultAlignment { get; set; } = 0x10;
+
+    /// <summary>
+    /// Bayonetta 1 (PC) and Bayonetta 2 per-member alignment, from Kerilk's <c>bayonetta_tools</c>
+    /// <c>DATFile::ALIGNMENTS</c> (BSD-2-Clause). The Wii U and PC DATs use the same table.
+    /// </summary>
+    public static Dictionary<string, int> PlatinumAlignments() => new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["dat"] = 0x2000,
+        ["wmb"] = 0x1000,
+        ["wtb"] = 0x1000,
+        ["wtp"] = 0x1000,
+        ["wta"] = 0x40,
+        ["exp"] = 0x1000,
+        ["sop"] = 0x40,
+        ["eff"] = 0x1000,
+        ["sdx"] = 0x1000,
+        ["bxm"] = 0x40,
+    };
+
+    private int AlignmentFor(DatSubFile subFile)
+    {
+        string ext = Path.GetExtension(subFile.Name);
+        if (ext.Length > 1)
+        {
+            string key = ext[1..];
+            if (Alignment.TryGetValue(key, out int a) && a > 0) return a;
+        }
+        if (Alignment.TryGetValue(subFile.Tag, out int t) && t > 0) return t;
+        return DefaultAlignment > 0 ? DefaultAlignment : 0x10;
+    }
+
+    /// <summary>Append a new sub-file; the member hash map is rebuilt on save.</summary>
+    public DatSubFile Add(string tag, string name, byte[] bytes)
+    {
+        var subFile = new DatSubFile(tag, name, bytes, 0, (uint)bytes.Length) { Owner = this };
+        _subFiles.Add(subFile);
+        MarkStructureDirty();
+        return subFile;
+    }
+
+    /// <summary>Remove a sub-file; the member hash map is rebuilt on save.</summary>
+    public bool Remove(DatSubFile subFile)
+    {
+        if (subFile.Owner != this || !_subFiles.Remove(subFile)) return false;
+        MarkStructureDirty();
+        return true;
+    }
+
     public bool IsDirty => _structureDirty || _subFiles.Any(s => s.IsDirty);
 
     /// <summary>True when the tables/offsets/names changed and the container must be rebuilt.</summary>
@@ -199,36 +270,45 @@ public sealed class DatFile
     public byte[] ToBytesForced() => ToBytesRebuild();
 
     public static bool HasMagic(ReadOnlySpan<byte> bytes) =>
-        bytes.Length >= 4 && Mem.ReadU32LE(bytes, 0) == MagicValue;
+        bytes.Length >= 4 && bytes[0] == (byte)'D' && bytes[1] == (byte)'A' && bytes[2] == (byte)'T' && bytes[3] == 0;
 
-    public static DatFile Parse(byte[] fileBytes)
+    /// <summary>
+    /// Parse a DAT container. The byte order is auto-detected by header sanity checks unless one
+    /// is forced; little-endian is preferred when both interpretations look plausible (all
+    /// PlatinumGames PC/Switch data is little-endian, only the Wii U ports are big-endian).
+    /// </summary>
+    public static DatFile Parse(byte[] fileBytes, ByteOrder? order = null)
     {
         if (!HasMagic(fileBytes))
             throw new InvalidDataException("not a DAT file (missing \"DAT\\0\" magic)");
         if (fileBytes.Length < 0x20)
             throw new InvalidDataException("DAT file is too small");
 
-        uint count = Mem.ReadU32LE(fileBytes, 0x04);
-        int pOffsets = checked((int)Mem.ReadU32LE(fileBytes, 0x08));
-        int pTags = checked((int)Mem.ReadU32LE(fileBytes, 0x0C));
-        int pNames = checked((int)Mem.ReadU32LE(fileBytes, 0x10));
-        int pDesc = checked((int)Mem.ReadU32LE(fileBytes, 0x14));
-        int pExtra = checked((int)Mem.ReadU32LE(fileBytes, 0x18));
-        uint word1C = Mem.ReadU32LE(fileBytes, 0x1C);
+        ByteOrder bo = order ?? DetectByteOrder(fileBytes);
 
+        uint count = Mem.ReadU32(fileBytes, 0x04, bo);
         if (count > 0x10000)
             throw new InvalidDataException($"implausible DAT sub-file count {count}");
+
+        int pOffsets = checked((int)Mem.ReadU32(fileBytes, 0x08, bo));
+        int pTags = checked((int)Mem.ReadU32(fileBytes, 0x0C, bo));
+        int pNames = checked((int)Mem.ReadU32(fileBytes, 0x10, bo));
+        int pDesc = checked((int)Mem.ReadU32(fileBytes, 0x14, bo));
+        int pExtra = checked((int)Mem.ReadU32(fileBytes, 0x18, bo));
+        uint word1C = Mem.ReadU32(fileBytes, 0x1C, bo);
 
         int n = (int)count;
         var offsets = new uint[n];
         for (int i = 0; i < n; i++)
-            offsets[i] = Mem.ReadU32LE(fileBytes, pOffsets + 4 * i);
+            offsets[i] = Mem.ReadU32(fileBytes, pOffsets + 4 * i, bo);
 
         var tags = new string[n];
         for (int i = 0; i < n; i++)
             tags[i] = ReadFixedTag(fileBytes, pTags + 4 * i);
 
-        int slot = Mem.ReadU32LE(fileBytes, pNames) is var s and > 0 and < 0x400 ? (int)s : 0;
+        int slot = pNames >= 0 && pNames + 4 <= fileBytes.Length
+            && Mem.ReadU32(fileBytes, pNames, bo) is var s and > 0 and < 0x400
+            ? (int)s : 0;
         var names = new string[n];
         for (int i = 0; i < n; i++)
         {
@@ -240,7 +320,7 @@ public sealed class DatFile
 
         var descriptors = new uint[n];
         for (int i = 0; i < n; i++)
-            descriptors[i] = Mem.ReadU32LE(fileBytes, pDesc + 4 * i);
+            descriptors[i] = Mem.ReadU32(fileBytes, pDesc + 4 * i, bo);
 
         uint baseOffset = n > 0 ? offsets.Min() : (uint)Math.Max(0x20, pExtra);
         int extraLength = (int)Math.Max(0, baseOffset - pExtra);
@@ -270,19 +350,77 @@ public sealed class DatFile
             subFiles.Add(new DatSubFile(tags[i], names[i], bytes, start, descriptors[i]));
         }
 
-        var parsed = new DatFile(subFiles, fileBytes)
+        var parsed = new DatFile(subFiles, fileBytes, names)
         {
             ExtraBlob = extra,
             BaseOffset = baseOffset,
             BaseAlignment = baseOffset >= 0x1000 && baseOffset % 0x1000 == 0 ? 0x1000 : 16,
             NameSlotSize = slot,
             HeaderWord1C = word1C,
+            ByteOrder = bo,
         };
+
+        if (pExtra > 0 && DatHashMap.TryParse(fileBytes, pExtra, n, bo, extraLength, out var hashMap))
+            parsed.HashMap = hashMap;
 
         foreach (var subFile in subFiles)
             subFile.Owner = parsed;
 
         return parsed;
+    }
+
+    /// <summary>
+    /// Decide the container's byte order from header sanity: the member count must be plausible and
+    /// every table pointer plus the first sub-file offset must lie inside the file. Little-endian
+    /// wins ties because only the Wii U ports are big-endian.
+    /// </summary>
+    public static ByteOrder DetectByteOrder(byte[] fileBytes)
+    {
+        bool little = HeaderLooksSane(fileBytes, ByteOrder.Little);
+        bool big = HeaderLooksSane(fileBytes, ByteOrder.Big);
+        if (little) return ByteOrder.Little;
+        if (big) return ByteOrder.Big;
+        throw new InvalidDataException(
+            "DAT header is not plausible in either byte order (corrupt or unsupported container)");
+    }
+
+    private static bool HeaderLooksSane(ReadOnlySpan<byte> b, ByteOrder order)
+    {
+        uint count = Mem.ReadU32(b, 0x04, order);
+        if (count > 0x10000) return false;
+
+        uint pOffsets = Mem.ReadU32(b, 0x08, order);
+        uint pTags = Mem.ReadU32(b, 0x0C, order);
+        uint pNames = Mem.ReadU32(b, 0x10, order);
+        uint pDesc = Mem.ReadU32(b, 0x14, order);
+        uint pExtra = Mem.ReadU32(b, 0x18, order);
+
+        int len = b.Length;
+        if (pOffsets < 0x20 || pOffsets + 4 >= len) return false;
+        if (pTags < 0x20 || pTags + 4 * (int)count > len) return false;
+        if (pNames < 0x20 || pNames + 4 > len) return false;
+        if (pDesc < 0x20 || pDesc + 4 * (int)count > len) return false;
+        if (pExtra != 0 && pExtra > len) return false;
+
+        // Empty containers (count == 0) are valid: e.g. a 64-byte placeholder DAT.
+        if (count == 0) return true;
+
+        uint slot = Mem.ReadU32(b, (int)pNames, order);
+        if (slot == 0 || slot > 0x400) return false;
+        if ((long)pNames + 4 + (long)slot * count > len) return false;
+
+        // The first member offset must be inside the file and past the metadata tables.
+        uint min = uint.MaxValue;
+        int nn = (int)count;
+        for (int i = 0; i < nn; i++)
+        {
+            uint off = Mem.ReadU32(b, (int)pOffsets + 4 * i, order);
+            if (off == 0) continue;
+            if (off < min) min = off;
+        }
+        if (min == uint.MaxValue) return false;
+        if (min >= len) return false;            // offset lies outside the file
+        return true;
     }
 
     /// <summary>The smallest sub-file offset strictly greater than <paramref name="start"/>.</summary>
@@ -311,7 +449,25 @@ public sealed class DatFile
         int lenTags = 4 * n;
         int lenNames = 4 + slot * n;
         int lenDesc = 4 * n;
-        int lenExtra = ExtraBlob.Length;
+
+        // The member hash table lives in the same region as ExtraBlob. It only needs rebuilding
+        // when the member set changed; otherwise it is preserved byte-for-byte, because members are
+        // replaced in place and their indices stay valid.
+        byte[] extraBlob = ExtraBlob;
+        bool membersChanged = n != _originalNames.Length;
+        if (!membersChanged)
+        {
+            for (int i = 0; i < n; i++)
+            {
+                if (string.Equals(_subFiles[i].Name, _originalNames[i], StringComparison.Ordinal)) continue;
+                membersChanged = true;
+                break;
+            }
+        }
+        if (membersChanged && HashMap != null)
+            extraBlob = DatHashMap.Build(_subFiles.Select(s => s.Name).ToList(), HashMap.PreHashShift).ToBytes(ByteOrder);
+
+        int lenExtra = extraBlob.Length;
 
         int pOffsets = 0x20;
         int pTags = Align4(pOffsets + lenOffsets);
@@ -350,6 +506,7 @@ public sealed class DatFile
             long cursor = baseOffset;
             for (int i = 0; i < n; i++)
             {
+                cursor = Mem.Align(cursor, AlignmentFor(_subFiles[i]));
                 offsets[i] = (uint)cursor;
                 cursor += _subFiles[i].Bytes.Length;
             }
@@ -370,22 +527,26 @@ public sealed class DatFile
             totalLength = Math.Max(totalLength, (long)offsets[i] + _subFiles[i].Bytes.Length);
 
         var output = new byte[totalLength];
-        Mem.WriteU32LE(output, 0x00, MagicValue);
-        Mem.WriteU32LE(output, 0x04, (uint)n);
-        Mem.WriteU32LE(output, 0x08, (uint)pOffsets);
-        Mem.WriteU32LE(output, 0x0C, (uint)pTags);
-        Mem.WriteU32LE(output, 0x10, (uint)pNames);
-        Mem.WriteU32LE(output, 0x14, (uint)pDesc);
-        Mem.WriteU32LE(output, 0x18, (uint)pExtra);
-        Mem.WriteU32LE(output, 0x1C, HeaderWord1C);
+        // The magic is four literal bytes in both byte orders ("DAT\0"), never an endian word.
+        output[0] = (byte)'D';
+        output[1] = (byte)'A';
+        output[2] = (byte)'T';
+        output[3] = 0;
+        Mem.WriteU32(output, 0x04, (uint)n, ByteOrder);
+        Mem.WriteU32(output, 0x08, (uint)pOffsets, ByteOrder);
+        Mem.WriteU32(output, 0x0C, (uint)pTags, ByteOrder);
+        Mem.WriteU32(output, 0x10, (uint)pNames, ByteOrder);
+        Mem.WriteU32(output, 0x14, (uint)pDesc, ByteOrder);
+        Mem.WriteU32(output, 0x18, (uint)pExtra, ByteOrder);
+        Mem.WriteU32(output, 0x1C, HeaderWord1C, ByteOrder);
 
         for (int i = 0; i < n; i++)
-            Mem.WriteU32LE(output, pOffsets + 4 * i, offsets[i]);
+            Mem.WriteU32(output, pOffsets + 4 * i, offsets[i], ByteOrder);
 
         for (int i = 0; i < n; i++)
             WriteFixedTag(output, pTags + 4 * i, _subFiles[i].Tag);
 
-        Mem.WriteU32LE(output, pNames, (uint)slot);
+        Mem.WriteU32(output, pNames, (uint)slot, ByteOrder);
         for (int i = 0; i < n; i++)
         {
             int at = pNames + 4 + i * slot;
@@ -405,11 +566,11 @@ public sealed class DatFile
                 if (sf.IsDirty || sf.DescriptorSize == (uint)sf.OriginalLength)
                     desc = (uint)sf.Bytes.Length;
             }
-            Mem.WriteU32LE(output, pDesc + 4 * i, desc);
+            Mem.WriteU32(output, pDesc + 4 * i, desc, ByteOrder);
         }
 
         if (lenExtra > 0)
-            ExtraBlob.CopyTo(output, pExtra);
+            extraBlob.CopyTo(output, pExtra);
 
         for (int i = 0; i < n; i++)
         {
