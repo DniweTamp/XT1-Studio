@@ -323,7 +323,8 @@ public sealed class DatFile
             descriptors[i] = Mem.ReadU32(fileBytes, pDesc + 4 * i, bo);
 
         uint baseOffset = n > 0 ? offsets.Min() : (uint)Math.Max(0x20, pExtra);
-        int extraLength = (int)Math.Max(0, baseOffset - pExtra);
+        // pExtra == 0 is the "no hash map" sentinel (Bayonetta 1 PC DATs); there is no extra region.
+        int extraLength = pExtra > 0 ? (int)Math.Max(0, baseOffset - pExtra) : 0;
         if (pExtra < 0 || pExtra > fileBytes.Length) extraLength = 0;
         if (pExtra + extraLength > fileBytes.Length) extraLength = fileBytes.Length - pExtra;
         var extra = extraLength > 0 ? fileBytes.AsSpan(pExtra, extraLength).ToArray() : Array.Empty<byte>();
