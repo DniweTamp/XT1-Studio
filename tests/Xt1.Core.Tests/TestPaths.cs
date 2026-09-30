@@ -45,6 +45,7 @@ public static class TestPaths
     public const string B2WuDump = @"D:\Roms\Wii U\Bayonetta 2\dump";
     public static string B2WuWp0020Dat => Path.Combine(B2WuDump, "wp", "wp0020.dat");
     public static string B2WuWp0020Wta => Path.Combine(B2WuDump, "wp", "wp0020_dat", "wp0020.wta");
+    public static string B2WuWp0020Wtp => Path.Combine(B2WuDump, "wp", "wp0020_dat", "wp0020.wtp");
     public static string B2WuPl022eDat => Path.Combine(B2WuDump, "pl", "pl022e.dat");
 
     public static bool Exists(string path) => File.Exists(path);
