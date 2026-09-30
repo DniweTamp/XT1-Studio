@@ -242,8 +242,7 @@ public sealed class WtbBank
 
     /// <summary>Recompute <c>table0</c> payload offsets as align4096 cumulative sizes.</summary>
     /// <param name="baseOffset">Stream base (0 split, 0x1000 standalone).</param>
-    public void RecalculatePayloadOffsets(uint baseOffset)
-    {
+    public void RecalculatePayloadOffsets(uint baseOffset)    {
         long cursor = 0;
         foreach (var tex in _textures)
         {
@@ -256,6 +255,31 @@ public sealed class WtbBank
             tex.PayloadSize = size;
             cursor = Mem.Align(cursor + size, 4096);
         }
+    }
+
+    /// <summary>
+    /// Rebuild a split bank after texture edits: recompute <c>table0</c> as 4096-aligned cumulative
+    /// payload sizes, serialize the bank, and return the paired payload stream (<c>.wtp</c>) the
+    /// textures point into. Used by the mod manager after replacing a texture's header and payload.
+    /// </summary>
+    public (byte[] Bank, byte[] PayloadStream) BuildSplit(uint streamBase = 0)
+    {
+        RecalculatePayloadOffsets(streamBase);
+        byte[] bank = ToBytes();
+
+        long end = 0;
+        foreach (var tex in _textures)
+            end = Math.Max(end, (long)tex.PayloadOffset + tex.Payload.Length);
+
+        var stream = new byte[end];
+        foreach (var tex in _textures)
+        {
+            if (tex.Payload.Length == 0) continue;
+            int at = (int)tex.PayloadOffset;
+            if (at >= 0 && at + tex.Payload.Length <= stream.Length)
+                tex.Payload.CopyTo(stream, at);
+        }
+        return (bank, stream);
     }
 
     private static EditableTexture CreatePlaceholder(int index)
