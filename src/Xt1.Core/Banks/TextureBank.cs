@@ -194,6 +194,19 @@ public sealed class TextureBank
             ? ByteOrder.Big
             : ByteOrder.Little;
 
+    /// <summary>True when the bytes are a WTB bank header (either byte order).</summary>
+    public static bool HasMagic(ReadOnlySpan<byte> bytes) =>
+        bytes.Length >= 4 &&
+        ((bytes[0] == (byte)'W' && bytes[1] == (byte)'T' && bytes[2] == (byte)'B' && bytes[3] == 0) ||
+         (bytes[0] == 0 && bytes[1] == (byte)'B' && bytes[2] == (byte)'T' && bytes[3] == (byte)'W'));
+
+    /// <summary>Detect a bank's pixel format and byte order from its header and optional stream.</summary>
+    public static (TextureBankFormat Format, ByteOrder Order) Detect(byte[] bankBytes, byte[]? payloadStream)
+    {
+        ByteOrder order = DetectOrder(bankBytes);
+        return (DetectFormat(bankBytes, payloadStream, order), order);
+    }
+
     private static TextureBankFormat DetectFormat(byte[] bankBytes, byte[]? payloadStream, ByteOrder order)
     {
         if (order == ByteOrder.Big) return TextureBankFormat.Gtx;
