@@ -7,6 +7,10 @@ artifacts/
 publish/
 publish-*/
 [Oo]ut/
+
+# Archives written to the repository root by publish-release.bat
+/src.zip
+/XT1Studio-win-x64.7z
 *.binlog
 *.tlog
 *.idb
