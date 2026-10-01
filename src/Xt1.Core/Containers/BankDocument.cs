@@ -276,13 +276,9 @@ public sealed class BankDocument
         for (int n = 0; n < wtaIndices.Count; n++)
         {
             int wtaIndex = wtaIndices[n];
-            int wtpIndex = n < wtpIndices.Count ? wtpIndices[n] : -1;
-            banks.Add((
-                HeaderDat!.SubFiles[wtaIndex],
-                HeaderDat,
-                wtpIndex >= 0 ? PayloadDat!.SubFiles[wtpIndex] : null,
-                wtaIndex,
-                wtpIndex));
+            var wta = HeaderDat!.SubFiles[wtaIndex];
+            var payloadSub = MatchPayload(wta, HeaderDat, PayloadDat, n);
+            banks.Add((wta, HeaderDat, payloadSub, wtaIndex, SubFileIndex(payloadSub)));
         }
 
         foreach (var container in new[] { PayloadDat, HeaderDat })
@@ -350,5 +346,42 @@ public sealed class BankDocument
             }
             return false;
         }
+    }
+
+    /// <summary>
+    /// Pair a "wta" bank with its "wtp" payload. The payload is not always at the same position in the
+    /// payload container (a `.dtt` interleaves "wtb" banks with the "wtp", and a container can hold
+    /// several banks), so match by the shared name stem (<c>pre_texture.wta</c> -&gt;
+    /// <c>pre_texture.wtp</c>) and only fall back to declaration order when names are absent.
+    /// </summary>
+    private static DatSubFile? MatchPayload(DatSubFile wta, DatFile? header, DatFile? payload, int ordinal)
+    {
+        static List<DatSubFile> Wtps(DatFile? container) =>
+            container is null
+                ? new List<DatSubFile>()
+                : container.SubFiles.Where(s => s.Tag == "wtp").ToList();
+
+        var payloadWtps = Wtps(payload);
+        var headerWtps = Wtps(header);
+
+        string stem = Path.GetFileNameWithoutExtension(wta.Name ?? string.Empty);
+        if (stem.Length > 0)
+        {
+            foreach (var candidate in payloadWtps.Concat(headerWtps))
+                if (string.Equals(Path.GetFileNameWithoutExtension(candidate.Name ?? string.Empty), stem,
+                        StringComparison.OrdinalIgnoreCase))
+                    return candidate;
+        }
+
+        var ordered = payloadWtps.Count > 0 ? payloadWtps : headerWtps;
+        return ordinal < ordered.Count ? ordered[ordinal] : null;
+    }
+
+    private static int SubFileIndex(DatSubFile? sub)
+    {
+        if (sub?.Owner is not { } owner) return -1;
+        for (int i = 0; i < owner.SubFiles.Count; i++)
+            if (ReferenceEquals(owner.SubFiles[i], sub)) return i;
+        return -1;
     }
 }
