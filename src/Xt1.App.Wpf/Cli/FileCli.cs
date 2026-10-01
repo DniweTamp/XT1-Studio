@@ -53,6 +53,7 @@ internal static class FileCli
                 "add" => Add(positional, options, log),
                 "delete" => Delete(positional, options, log),
                 "replace-raw" or "replace-xt1" => ReplaceRaw(positional, options, log),
+                "dummy" or "dummy-out" => Dummy(positional, options, log),
                 "recompress" => Recompress(positional, options, log),
                 _ => Unknown(op, log),
             };
@@ -372,6 +373,56 @@ internal static class FileCli
 
         SyncRawPayload(document, texture, section);
         log(result.Warning is null ? "replaced payload" : "replaced payload: " + result.Warning);
+        return Write(document, options, log);
+    }
+
+    /// <summary>
+    /// Replace a 2D texture with a solid 8x8, single-level ASTC 8x8 fill. Mirrors the shell's
+    /// "Dummy out" menu: <c>--fill white|black|normal</c>, sRGB/UNORM follows the source texture.
+    /// </summary>
+    private static int Dummy(List<string> positional, string[] options, Action<string> log)
+    {
+        if (positional.Count < 1) { Usage(log); return 2; }
+
+        string fillText = CliOptions.Get(options, "--fill") ?? "white";
+        if (!TextureOperations.TryParseDummyFill(fillText, out var fill))
+        {
+            log($"[error] unknown --fill '{fillText}' (white, black, normal)");
+            return 2;
+        }
+
+        var document = Load(positional[0], log);
+        if (document is null) return 2;
+
+        var one = RequireOne(document, options, log);
+        if (one is null) return 2;
+        var (texture, section) = one.Value;
+
+        var type = texture.Header.Type;
+        if (type.Is3D() || type.IsCube())
+        {
+            log("[error] dummy out supports 2D textures only");
+            return 1;
+        }
+
+        var format = TextureOperations.DummyFormat(texture);
+        if (format is null)
+        {
+            log("[error] ASTC 8x8 is not available");
+            return 1;
+        }
+
+        var encoder = BuildEncoders().Pick(EncoderBackend.Nvtt, format);
+        var result = TextureOperations.DummyOut(texture, fill, encoder,
+            ParseQuality(CliOptions.Get(options, "--quality")), !Has(options, "--no-sync-flags"));
+        if (!result.Success)
+        {
+            log($"[error] {result.Error}");
+            return 1;
+        }
+
+        SyncRawPayload(document, texture, section);
+        log($"dummied out #{texture.Index} ({fillText}) as {format.Name} 8x8");
         return Write(document, options, log);
     }
 
@@ -727,6 +778,7 @@ internal static class FileCli
         log("  add <path> <image|file.dds> [--bank N]       add a texture to a bank");
         log("  delete <path>                                delete one texture");
         log("  replace-raw <path> <file|payload> [--force]  replace from an .xt1 or raw payload");
+        log("  dummy <path> [--fill white|black|normal]     replace with a solid 8x8 ASTC 8x8 (2D only)");
         log("  recompress <path>...                         recompress ASTC textures to a chosen format");
         log("");
         log("selectors: --bank N  --index N  --hash 0xH");

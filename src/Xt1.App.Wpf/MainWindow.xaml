@@ -173,6 +173,12 @@
                                               ToolTip="Replace this texture from an image (re-encoded) or a DDS (lossless)" />
                                     <MenuItem x:Name="TreeMenuReplaceXt1" Header="Replace with .xt1..." Click="OnTreeReplaceXt1"
                                               ToolTip="Replace the header and payload from a raw .xt1, or drop in a bare payload" />
+                                    <MenuItem x:Name="TreeMenuDummy" Header="Dummy out"
+                                              ToolTip="Replace this 2D texture with a solid 8x8, single-level ASTC 8x8 fill (sRGB/UNORM follows the source)">
+                                        <MenuItem Header="White" Tag="white" Click="OnTreeDummyOut" />
+                                        <MenuItem Header="Black" Tag="black" Click="OnTreeDummyOut" />
+                                        <MenuItem Header="Normal (128,128,255)" Tag="normal" Click="OnTreeDummyOut" />
+                                    </MenuItem>
                                     <Separator Style="{StaticResource MenuSeparator}" />
                                     <MenuItem x:Name="TreeMenuExportGroup" Header="Export">
                                         <MenuItem x:Name="TreeMenuExportPng" Header="Export .png..." Click="OnTreeExportPng" />

@@ -579,4 +579,80 @@ public class EditingTests
         Assert.True(reparsed.IncludeTable3);
         Assert.Equal(0x12345678u, reparsed.Textures[0].Hash);
     }
+
+    private static ITextureEncoder DummyEncoder(Xt1Format format) =>
+        new EncoderPicker(nvtt: null, cli: null).Pick(EncoderBackend.Nvtt, FormatTable.Get(format)!);
+
+    /// <summary>Dummy out replaces a 2D texture with a solid 8x8, single-level ASTC 8x8.</summary>
+    [Fact]
+    public void DummyOut_Makes8x8SingleLevelAstcAndUndoes()
+    {
+        var texture = EditableTexture.CreateNew(Xt1Format.Astc8x8Unorm, 64, 64);
+        var encoder = DummyEncoder(Xt1Format.Astc8x8Unorm);
+
+        var result = TextureOperations.DummyOut(texture, TextureOperations.DummyFill.Normal, encoder,
+            EncodeQuality.Fastest);
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(Xt1Format.Astc8x8Unorm, texture.Header.Format);
+        Assert.Equal(8u, texture.Header.Width);
+        Assert.Equal(8u, texture.Header.Height);
+        Assert.Equal(1, texture.Header.MipCount);
+
+        // One undo step restores the original size and format.
+        var command = TextureOperations.TakePendingCommand();
+        Assert.NotNull(command);
+        command!.Undo();
+        Assert.Equal(64u, texture.Header.Width);
+        Assert.Equal(Xt1Format.Astc8x8Unorm, texture.Header.Format);
+    }
+
+    /// <summary>The dummy keeps the source's colour space: an sRGB source produces ASTC 8x8 sRGB.</summary>
+    [Fact]
+    public void DummyOut_FollowsTheSourceColorSpace()
+    {
+        var srgb = EditableTexture.CreateNew(Xt1Format.Astc8x8Srgb, 32, 32);
+        Assert.True(TextureOperations.DummyOut(srgb, TextureOperations.DummyFill.White,
+            DummyEncoder(Xt1Format.Astc8x8Srgb), EncodeQuality.Fastest).Success);
+        Assert.Equal(Xt1Format.Astc8x8Srgb, srgb.Header.Format);
+
+        // A non-sRGB source becomes UNORM even when it started as another family.
+        var bc7 = EditableTexture.CreateNew(Xt1Format.Bc7Unorm, 32, 32);
+        Assert.True(TextureOperations.DummyOut(bc7, TextureOperations.DummyFill.Black,
+            DummyEncoder(Xt1Format.Astc8x8Unorm), EncodeQuality.Fastest).Success);
+        Assert.Equal(Xt1Format.Astc8x8Unorm, bc7.Header.Format);
+    }
+
+    [Theory]
+    [InlineData("white", TextureOperations.DummyFill.White)]
+    [InlineData("black", TextureOperations.DummyFill.Black)]
+    [InlineData("normal", TextureOperations.DummyFill.Normal)]
+    [InlineData("  NORMAL  ", TextureOperations.DummyFill.Normal)]
+    public void TryParseDummyFill_RecognisesNames(string text, TextureOperations.DummyFill expected)
+    {
+        Assert.True(TextureOperations.TryParseDummyFill(text, out var fill));
+        Assert.Equal(expected, fill);
+    }
+
+    [Fact]
+    public void TryParseDummyFill_RejectsUnknown()
+    {
+        Assert.False(TextureOperations.TryParseDummyFill("pink", out _));
+    }
+
+    [Fact]
+    public void DummyOut_RejectsCubesAndVolumes()
+    {
+        var encoder = DummyEncoder(Xt1Format.Astc8x8Unorm);
+
+        var cube = EditableTexture.CreateNew(Xt1Format.Astc8x8Unorm, 16, 16);
+        cube.Header.Type = TextureType.TCube;
+        Assert.False(TextureOperations.DummyOut(cube, TextureOperations.DummyFill.Black, encoder,
+            EncodeQuality.Fastest).Success);
+
+        var volume = EditableTexture.CreateNew(Xt1Format.Astc8x8Unorm, 16, 16);
+        volume.Header.Type = TextureType.T3D;
+        Assert.False(TextureOperations.DummyOut(volume, TextureOperations.DummyFill.Black, encoder,
+            EncodeQuality.Fastest).Success);
+    }
 }

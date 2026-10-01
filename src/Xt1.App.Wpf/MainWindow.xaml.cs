@@ -1569,6 +1569,7 @@ public partial class MainWindow : Window
         TreeMenuExportXt1.IsEnabled = hasTexture;
         TreeMenuDelete.IsEnabled = hasTexture && section is not null;
         TreeMenuCopyHash.IsEnabled = hasTexture;
+        TreeMenuDummy.IsEnabled = hasTexture;
         TreeMenuExportBank.IsEnabled = bankHasTextures;
         TreeMenuBatchReplace.IsEnabled = bankHasTextures;
     }
@@ -2150,6 +2151,48 @@ public partial class MainWindow : Window
         {
             StatusLeft.Text = "Import failed: " + ex.Message;
         }
+    }
+
+    /// <summary>Replace the selected 2D texture with a solid 8x8 ASTC 8x8 dummy (White/Black/Normal).</summary>
+    private void OnTreeDummyOut(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string tag } ||
+            !TextureOperations.TryParseDummyFill(tag, out var fill)) return;
+        DummyOutSelected(fill);
+    }
+
+    private void DummyOutSelected(TextureOperations.DummyFill fill)
+    {
+        var (texture, _) = SelectedAssetTarget();
+        if (texture is null) return;
+
+        var type = texture.Header.Type;
+        if (type.Is3D() || type.IsCube())
+        {
+            StatusLeft.Text = "Dummy out supports 2D textures only.";
+            return;
+        }
+
+        var format = TextureOperations.DummyFormat(texture);
+        if (format is null)
+        {
+            StatusLeft.Text = "Dummy out failed: ASTC 8x8 is not available.";
+            return;
+        }
+
+        var encoder = _encoders.Pick(EncoderBackend.Nvtt, format);
+        var result = TextureOperations.DummyOut(texture, fill, encoder, EncodeQuality.Normal,
+            App.Settings.SyncFlagsFromFormat);
+        if (!result.Success)
+        {
+            RefreshAfterEdit(texture);
+            StatusLeft.Text = "Dummy out failed: " + result.Error;
+            return;
+        }
+
+        PushPendingCommand();
+        RefreshAfterEdit(texture);
+        StatusLeft.Text = $"Dummied out #{texture.Index} as {format.Name} 8x8.";
     }
 
     /// <summary>Replace the selected texture from a raw .xt1 file (or a bare payload).</summary>

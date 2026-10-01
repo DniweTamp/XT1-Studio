@@ -103,6 +103,86 @@ public static class TextureOperations
         return OperationResult.Ok();
     }
 
+    /// <summary>The solid fill a "dummy out" replacement uses.</summary>
+    public enum DummyFill
+    {
+        White,
+        Black,
+
+        /// <summary>A flat tangent-space normal: RGB (0x80, 0x80, 0xFF).</summary>
+        Normal,
+    }
+
+    /// <summary>Edge length of a dummy texture: one ASTC 8x8 block, no mips.</summary>
+    public const int DummySize = 8;
+
+    /// <summary>Parse a fill name (<c>white</c>/<c>black</c>/<c>normal</c>) shared by the menu and the CLI.</summary>
+    public static bool TryParseDummyFill(string? text, out DummyFill fill)
+    {
+        switch (text?.Trim().ToLowerInvariant())
+        {
+            case "white": fill = DummyFill.White; return true;
+            case "black": fill = DummyFill.Black; return true;
+            case "normal": fill = DummyFill.Normal; return true;
+            default: fill = DummyFill.White; return false;
+        }
+    }
+
+    /// <summary>
+    /// Target format for a dummy: ASTC 8x8 in the source texture's colour space, so a dummy keeps
+    /// the sRGB/UNORM meaning the original texture had.
+    /// </summary>
+    public static FormatInfo? DummyFormat(EditableTexture texture) =>
+        texture.FormatInfo?.IsSrgb == true
+            ? FormatTable.Get(Xt1Format.Astc8x8Srgb)
+            : FormatTable.Get(Xt1Format.Astc8x8Unorm);
+
+    /// <summary>
+    /// Replace a 2D texture with a solid 8x8, single-level ASTC 8x8 fill ("dummy it out"), keeping the
+    /// source's sRGB/UNORM colour space. Undoable like the other replace operations.
+    /// </summary>
+    public static OperationResult DummyOut(EditableTexture texture, DummyFill fill, ITextureEncoder encoder,
+        EncodeQuality quality, bool syncFlags = false)
+    {
+        var type = texture.Header.Type;
+        if (type.Is3D() || type.IsCube())
+            return OperationResult.Fail("dummy out supports 2D textures only");
+
+        var format = DummyFormat(texture);
+        if (format is null) return OperationResult.Fail("ASTC 8x8 is not available");
+
+        var image = new RgbaImage(DummySize, DummySize);
+        FillSolid(image, fill);
+
+        // Capture the header before switching the format so undo restores the original header, and a
+        // failed encode leaves it untouched (the replace operation does the same for imports).
+        var originalHeader = texture.Header.Raw.ToArray();
+        texture.Header.Format = format.Format;
+        var result = Replace2D(texture, image, encoder, mipCount: 1, quality, originalHeader, syncFlags);
+        if (!result.Success) originalHeader.CopyTo(texture.Header.Raw, 0); // the format change must not survive a failed encode
+        return result;
+    }
+
+    private static void FillSolid(RgbaImage image, DummyFill fill)
+    {
+        (byte r, byte g, byte b) = fill switch
+        {
+            DummyFill.White => ((byte)0xFF, (byte)0xFF, (byte)0xFF),
+            DummyFill.Black => ((byte)0x00, (byte)0x00, (byte)0x00),
+            DummyFill.Normal => ((byte)0x80, (byte)0x80, (byte)0xFF),
+            _ => throw new ArgumentOutOfRangeException(nameof(fill), fill, "unknown dummy fill"),
+        };
+
+        var pixels = image.Pixels;
+        for (int i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i] = r;
+            pixels[i + 1] = g;
+            pixels[i + 2] = b;
+            pixels[i + 3] = 0xFF; // opaque
+        }
+    }
+
     /// <summary>
     /// Replace a texture from an already-compressed DDS, losslessly (surfaces are copied, not
     /// decoded/re-encoded) and with the DDS's own mip chain. Wrapped in an undoable command.

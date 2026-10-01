@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using Xt1.Core.Containers;
+using Xt1.Core.Editing;
 using Xt1.Core.Settings;
 using Xt1.Core.Xt1;
 
@@ -54,6 +55,39 @@ public partial class MainWindow
     }
 
     internal string UiTestInspectorValidation => ValidationText.Text ?? string.Empty;
+
+    /// <summary>Format/size/mips of the selected texture, for the headless smoke.</summary>
+    internal string UiTestSelectedTexture =>
+        _selected is null
+            ? "none"
+            : $"{_selected.FormatInfo?.Name} {_selected.Header.Width}x{_selected.Header.Height} m{_selected.Header.MipCount}";
+
+    /// <summary>Run "Dummy out" on the selected texture the way the context menu does.</summary>
+    internal string UiTestDummyOut(string fill)
+    {
+        DummyOutSelected(TextureOperations.TryParseDummyFill(fill, out var value)
+            ? value
+            : TextureOperations.DummyFill.White);
+        return UiTestSelectedTexture;
+    }
+
+    /// <summary>Select the first 2D texture, for checks that do not apply to cubes/volumes.</summary>
+    internal string UiTestSelectFirst2DTexture()
+    {
+        if (_document is null) return "no document";
+        for (int s = 0; s < _document.Sections.Count; s++)
+        {
+            var textures = _document.Sections[s].Bank.Textures;
+            for (int t = 0; t < textures.Count; t++)
+            {
+                var type = textures[t].Header.Type;
+                if (type.Is3D() || type.IsCube()) continue;
+                UiTestSelectTexture(s, t);
+                return $"#{textures[t].Index}";
+            }
+        }
+        return "none";
+    }
 
     /// <summary>Select the first volume in the document, as the 3D checks need one.</summary>
     internal string UiTestSelectFirstVolume()

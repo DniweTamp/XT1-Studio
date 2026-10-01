@@ -227,6 +227,15 @@ internal static class UiSmoke
                         listState.Contains("grid=False") && listState.Contains("tiles=0"), listState);
                     Step("asset browser zoom done");
 
+                    // Dummy out: the selected 2D texture becomes a solid single-level 8x8 ASTC 8x8.
+                    Step("--- dummy out ---");
+                    window.UiTestSelectFirst2DTexture();
+                    var dummyState = window.UiTestDummyOut("normal");
+                    log($"       dummy out: {dummyState}");
+                    Expect("dummy out yields a single-level 8x8 ASTC",
+                        dummyState.Contains("ASTC_LDR_8x8") && dummyState.Contains("8x8 m1"), dummyState);
+                    Step("dummy out done");
+
                     // A brand-new empty bank must still offer "Add texture".
                     Step("--- empty bank ---");
                     window.UiTestCreateEmptyBank(standalone: false);
