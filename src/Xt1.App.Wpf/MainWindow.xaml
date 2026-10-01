@@ -35,20 +35,6 @@
                         </ContextMenu>
                     </Button.ContextMenu>
                 </Button>
-                <Button Style="{StaticResource MenuTopButton}" Content="Edit" Click="OnOpenMenu">
-                    <Button.ContextMenu>
-                        <ContextMenu>
-                            <MenuItem x:Name="UndoMenuItem" Header="Undo" Click="OnMenuUndo" InputGestureText="Ctrl+Z" IsEnabled="False" />
-                            <MenuItem x:Name="RedoMenuItem" Header="Redo" Click="OnMenuRedo" InputGestureText="Ctrl+Y" IsEnabled="False" />
-                            <Separator Style="{StaticResource MenuSeparator}" />
-                            <MenuItem x:Name="MenuExportContainer" Header="Export every texture in this container">
-                                <MenuItem Header="As PNG folder..." Tag="png" Click="OnMenuExportContainer" />
-                                <MenuItem Header="As DDS folder..." Tag="dds" Click="OnMenuExportContainer" />
-                                <MenuItem Header="As XT1 folder..." Tag="xt1" Click="OnMenuExportContainer" />
-                            </MenuItem>
-                        </ContextMenu>
-                    </Button.ContextMenu>
-                </Button>
                 <Button Style="{StaticResource MenuTopButton}" Content="Tools" Click="OnOpenMenu">
                     <Button.ContextMenu>
                         <ContextMenu>
@@ -197,6 +183,11 @@
                                         <MenuItem Header="As PNG folder..." Tag="png" Click="OnTreeExportBank" />
                                         <MenuItem Header="As DDS folder..." Tag="dds" Click="OnTreeExportBank" />
                                         <MenuItem Header="As XT1 folder..." Tag="xt1" Click="OnTreeExportBank" />
+                                    </MenuItem>
+                                    <MenuItem x:Name="TreeMenuExportContainer" Header="Export every texture in this container">
+                                        <MenuItem Header="As PNG folder..." Tag="png" Click="OnMenuExportContainer" />
+                                        <MenuItem Header="As DDS folder..." Tag="dds" Click="OnMenuExportContainer" />
+                                        <MenuItem Header="As XT1 folder..." Tag="xt1" Click="OnMenuExportContainer" />
                                     </MenuItem>
                                     <MenuItem x:Name="TreeMenuBatchReplace" Header="Batch replace from folder..." Click="OnTreeBatchReplace"
                                               ToolTip="Replace every texture in this bank from a folder of files exported by this tool (matched by tex&lt;index&gt;_0x&lt;hash&gt;)" />

@@ -502,10 +502,6 @@ public partial class MainWindow : Window
 
     private void OnMenuExit(object sender, RoutedEventArgs e) => Close();
 
-    private void OnMenuUndo(object sender, RoutedEventArgs e) => Undo();
-
-    private void OnMenuRedo(object sender, RoutedEventArgs e) => Redo();
-
     private void Undo()
     {
         if (!_history.Undo()) return;
@@ -695,8 +691,6 @@ public partial class MainWindow : Window
         RedoButton.IsEnabled = _history.CanRedo;
         UndoButton.ToolTip = _history.UndoName ?? "Nothing to undo";
         RedoButton.ToolTip = _history.RedoName ?? "Nothing to redo";
-        UndoMenuItem.IsEnabled = _history.CanUndo;
-        RedoMenuItem.IsEnabled = _history.CanRedo;
     }
 
     // --- preview controls -----------------------------------------------------------------
@@ -1651,6 +1645,8 @@ public partial class MainWindow : Window
         TreeMenuCopyHash.IsEnabled = hasTexture;
         TreeMenuDummy.IsEnabled = hasTexture;
         TreeMenuExportBank.IsEnabled = bankHasTextures;
+        TreeMenuExportContainer.IsEnabled = _document is not null &&
+            (_document.RawXt1 is not null || _document.Sections.Any(s => s.Bank.Count > 0));
         TreeMenuBatchReplace.IsEnabled = bankHasTextures;
     }
 
