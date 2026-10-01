@@ -30,6 +30,18 @@ public static class TextureOperations
     public static OperationResult Replace2D(EditableTexture texture, RgbaImage image,
         ITextureEncoder encoder, bool generateMips, EncodeQuality quality, byte[]? originalHeader = null,
         bool syncFlags = false)
+        => Replace2D(texture, image, encoder,
+            generateMips ? MipChain.FullMipCount(image.Width, image.Height) : 1,
+            quality, originalHeader, syncFlags);
+
+    /// <summary>
+    /// Replace a 2D texture with an explicit mip count. Batch replace uses this to preserve each
+    /// texture's own mip count rather than regenerating a full chain; see the boolean overload for
+    /// <paramref name="originalHeader"/>.
+    /// </summary>
+    public static OperationResult Replace2D(EditableTexture texture, RgbaImage image,
+        ITextureEncoder encoder, int mipCount, EncodeQuality quality, byte[]? originalHeader = null,
+        bool syncFlags = false)
     {
         var beforePayload = texture.Payload;
         var beforeHeader = originalHeader ?? texture.Header.Raw.ToArray();
@@ -41,7 +53,11 @@ public static class TextureOperations
         var beforeH = texture.Header.Height;
         var beforeTable2 = (byte[])texture.Table2Bytes.Clone();
 
-        var result = TextureEncoder.Encode2D(texture, image, encoder, generateMips, quality);
+        var format = texture.FormatInfo;
+        if (format is null) return OperationResult.Fail("unknown format");
+
+        var levels = MipChain.Build(image, Math.Max(1, mipCount), format.IsSrgb);
+        var result = TextureEncoder.EncodeLevels(texture, levels, encoder, quality);
         if (!result.Success)
             return OperationResult.Fail(result.Error ?? "encode failed");
 

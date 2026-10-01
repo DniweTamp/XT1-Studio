@@ -1524,6 +1524,7 @@ public partial class MainWindow : Window
         TreeMenuDelete.IsEnabled = hasTexture && section is not null;
         TreeMenuCopyHash.IsEnabled = hasTexture;
         TreeMenuExportBank.IsEnabled = bankHasTextures;
+        TreeMenuBatchReplace.IsEnabled = bankHasTextures;
     }
 
     private string FileStem => Path.GetFileNameWithoutExtension(_document?.FilePath ?? "texture");
@@ -1924,6 +1925,50 @@ public partial class MainWindow : Window
         var textures = section.Bank.Textures.ToList();
         await ExportTexturesAsync(textures, picker.FolderName, section.Label, format,
             texture => $"tex{texture.Index}_0x{texture.EffectiveHash():X8}{extension}");
+    }
+
+    /// <summary>Replace every texture in the selected bank from a folder of exported files.</summary>
+    private void OnTreeBatchReplace(object sender, RoutedEventArgs e)
+    {
+        var section = TargetBank();
+        if (section is null) return;
+        if (section.Bank.Count == 0)
+        {
+            StatusLeft.Text = "This bank has no textures.";
+            return;
+        }
+
+        // The same folder picker the bank export uses; no file is read until the dialog scans it.
+        var picker = new OpenFolderDialog { Title = $"Choose the replacement folder for {section.Label}" };
+        if (picker.ShowDialog(this) != true) return;
+
+        // Only this bank's textures are considered, matched by index and hash against the exported
+        // names, so a folder shared with other banks cannot pull in another bank's files.
+        var textures = section.Bank.Textures.ToList();
+        var dialog = new BatchReplaceDialog(section.Label, picker.FolderName,
+            (folder, token) => Task.Run(() => TextureBatchReplacer.BuildPlan(textures, folder, token), token),
+            RunBatchReplaceAsync,
+            ApplyBatchReplaceResult)
+        {
+            Owner = this,
+        };
+        dialog.ShowDialog();
+    }
+
+    private Task<BatchReplaceRunResult> RunBatchReplaceAsync(BatchReplaceRequest request,
+        IProgress<string> progress, CancellationToken token) =>
+        Task.Run(() => new TextureBatchReplacer(_encoders).Apply(request.Plan, request.Options, progress, token),
+            CancellationToken.None);
+
+    /// <summary>Turn a finished batch into one undo step and refresh the shell (UI thread).</summary>
+    private void ApplyBatchReplaceResult(BatchReplaceRunResult result)
+    {
+        if (result.Commands.Count > 0)
+            _history.Push(new CompositeCommand("Batch replace textures", result.Commands));
+
+        RefreshAfterEdit();
+        StatusLeft.Text = $"Batch replace: {result.Stats.Replaced} replaced, {result.Stats.Skipped} skipped, " +
+                          $"{result.Stats.Unused} unused file(s).";
     }
 
     private async void ExportContainerTextures(TextureExportFormat format)

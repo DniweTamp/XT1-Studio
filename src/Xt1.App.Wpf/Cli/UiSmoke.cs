@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Threading;
 using Xt1.App.Wpf.Dialogs;
+using Xt1.Core.Editing;
 using Xt1.Core.Settings;
 using Xt1.Core.Xt1;
 
@@ -264,6 +265,28 @@ internal static class UiSmoke
                     settingsDialog.Close();
                     Pump(10);
                     Step("settings dialog closed");
+
+                    // The batch-replace dialog: shown so its XAML and style references load. With an
+                    // empty folder the scan reports "no folder" and Run stays disabled.
+                    Step("--- batch replace dialog ---");
+                    var batchDialog = new BatchReplaceDialog("test bank", string.Empty,
+                        (_, _) => Task.FromResult(new BatchReplacePlan(
+                            Array.Empty<BatchReplaceEntry>(), Array.Empty<string>())),
+                        (_, _, _) => Task.FromResult(new BatchReplaceRunResult(
+                            Array.Empty<IEditCommand>(), new BatchReplaceStats(0, 0, 0, 0), false)),
+                        _ => { })
+                    {
+                        Owner = window,
+                    };
+                    batchDialog.Show();
+                    Pump(20);
+                    var batchState = batchDialog.UiTestState();
+                    log($"       batch replace dialog: {batchState}");
+                    Expect("the batch replace dialog loads with the four quality options",
+                        batchState.Contains("qualities=4"), batchState);
+                    batchDialog.Close();
+                    Pump(10);
+                    Step("batch replace dialog closed");
 
 
                     // The 3D viewport's shared controls, through the same selection path a user takes.

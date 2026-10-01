@@ -87,3 +87,30 @@ public sealed class DelegateCommand : IEditCommand
 
     public void Undo() => _undo();
 }
+
+/// <summary>
+/// Several commands applied as one history entry: undo runs them in reverse, redo in order. Used by
+/// batch operations so a whole run is a single Ctrl+Z rather than one step per texture.
+/// </summary>
+public sealed class CompositeCommand : IEditCommand
+{
+    private readonly IReadOnlyList<IEditCommand> _commands;
+
+    public CompositeCommand(string name, IReadOnlyList<IEditCommand> commands)
+    {
+        Name = name;
+        _commands = commands;
+    }
+
+    public string Name { get; }
+
+    public void Do()
+    {
+        foreach (var command in _commands) command.Do();
+    }
+
+    public void Undo()
+    {
+        for (int i = _commands.Count - 1; i >= 0; i--) _commands[i].Undo();
+    }
+}

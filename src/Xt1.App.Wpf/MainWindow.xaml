@@ -173,6 +173,8 @@
                                         <MenuItem Header="As DDS folder..." Tag="dds" Click="OnTreeExportBank" />
                                         <MenuItem Header="As XT1 folder..." Tag="xt1" Click="OnTreeExportBank" />
                                     </MenuItem>
+                                    <MenuItem x:Name="TreeMenuBatchReplace" Header="Batch replace from folder..." Click="OnTreeBatchReplace"
+                                              ToolTip="Replace every texture in this bank from a folder of files exported by this tool (matched by tex&lt;index&gt;_0x&lt;hash&gt;)" />
                                 </ContextMenu>
                             </TreeView.ContextMenu>
                         </TreeView>
