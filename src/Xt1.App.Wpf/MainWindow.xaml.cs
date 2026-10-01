@@ -73,8 +73,11 @@ public partial class MainWindow : Window
     private const string HashTip =
         "The CRC32 hash (table3), pasted as hex (0x prefix optional). Editing it fixes the value written on save";
     private const string HashCalcTip = "Ask for a name and compute crc32(name) & 0x7FFFFFFF";
-    private const string ModelFlagTip =
-        "table2 byte 0, bit 0x20 - set for model and UI bank entries, clear otherwise";
+    private const string NoHashTip =
+        "This record has no CRC32 hash; enable 'Has CRC32 hash' to edit the value";
+    private const string HashFlagTip =
+        "table2 byte 0, bit 0x20 - whether the record carries a CRC32 hash " +
+        "(set for model/UI/character banks, clear for effect banks)";
     private const string SrgbFlagTip = "table2 byte 3, bit 0x04";
     private const string CubeFlagTip = "table2 byte 3, bit 0x80";
 
@@ -1855,7 +1858,7 @@ public partial class MainWindow : Window
                 }
             }
 
-            // New textures default to the model/UI bank class and, per the flag-sync preference, get
+            // New textures default to carrying a CRC32 hash and, per the flag-sync preference, get
             // their sRGB/cubemap bits from the format they were encoded with.
             texture.Name = name;
             texture.HashMode = HashMode.AutoFromName;
@@ -2043,13 +2046,12 @@ public partial class MainWindow : Window
         bool raw = _document?.RawXt1 is not null;
         bool editable = hasTexture && !raw;
 
-        HashCalcButton.IsEnabled = editable;
         ModelCheck.IsEnabled = editable;
         SrgbCheck.IsEnabled = editable;
         CubeCheck.IsEnabled = editable;
-        HashBox.IsReadOnly = !editable;
 
         ApplyInspectorTooltips(raw);
+        UpdateHashControls();
 
         // The developer field editor follows the selection; raw .xt1 wrappers stay read-only.
         FieldEditor.Bind(_document, section, texture);
@@ -2129,6 +2131,7 @@ public partial class MainWindow : Window
         Table2Text.Text = FormatTable2(_selected);
         _suppressFlags = false;
 
+        UpdateHashControls();
         UpdateSummary(_selected);
         UpdateValidation(_selected);
         FieldEditor.RefreshValues();
@@ -2137,11 +2140,36 @@ public partial class MainWindow : Window
     /// <summary>Raw `.xt1` payloads cannot be edited yet, so their controls explain why.</summary>
     private void ApplyInspectorTooltips(bool raw)
     {
-        HashBox.ToolTip = raw ? RawReadOnlyTip : HashTip;
-        HashCalcButton.ToolTip = raw ? RawReadOnlyTip : HashCalcTip;
-        ModelCheck.ToolTip = raw ? RawReadOnlyTip : ModelFlagTip;
+        ModelCheck.ToolTip = raw ? RawReadOnlyTip : HashFlagTip;
         SrgbCheck.ToolTip = raw ? RawReadOnlyTip : SrgbFlagTip;
         CubeCheck.ToolTip = raw ? RawReadOnlyTip : CubeFlagTip;
+    }
+
+    /// <summary>
+    /// The CRC32 hash only exists when the "Has CRC32 hash" flag is set, so the field and its
+    /// Calculate button are greyed out otherwise. Raw payloads stay read-only as before.
+    /// </summary>
+    private void UpdateHashControls()
+    {
+        if (_selected is null)
+        {
+            HashBox.IsReadOnly = true;
+            HashBox.IsEnabled = false;
+            HashCalcButton.IsEnabled = false;
+            HashBox.ToolTip = null;
+            HashCalcButton.ToolTip = null;
+            return;
+        }
+
+        bool editable = _document?.RawXt1 is null;
+        bool hasHash = _selected.IsModelBankClass;
+
+        HashBox.IsReadOnly = !editable;
+        HashBox.IsEnabled = hasHash;
+        HashCalcButton.IsEnabled = editable && hasHash;
+
+        HashBox.ToolTip = !editable ? RawReadOnlyTip : hasHash ? HashTip : NoHashTip;
+        HashCalcButton.ToolTip = !editable ? RawReadOnlyTip : hasHash ? HashCalcTip : NoHashTip;
     }
 
     private void UpdateValidation(EditableTexture texture)
@@ -2167,9 +2195,13 @@ public partial class MainWindow : Window
         return $"table2 = {bytes[0]:X2} {bytes[1]:X2} {bytes[2]:X2} {bytes[3]:X2}";
     }
 
-    private void OnModelFlagChanged(object sender, RoutedEventArgs e) =>
-        ApplyFlag("Set bank class", ModelCheck.IsChecked == true,
+    private void OnModelFlagChanged(object sender, RoutedEventArgs e)
+    {
+        ApplyFlag("Set CRC32 hash flag", ModelCheck.IsChecked == true,
             t => t.IsModelBankClass, (t, v) => t.SetModelBankClass(v));
+        // The hash field follows the flag: greyed out when the record has no CRC32 hash.
+        UpdateHashControls();
+    }
 
     private void OnSrgbFlagChanged(object sender, RoutedEventArgs e) =>
         ApplyFlag("Set sRGB flag", SrgbCheck.IsChecked == true,

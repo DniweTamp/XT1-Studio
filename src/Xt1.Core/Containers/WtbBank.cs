@@ -39,8 +39,17 @@ public sealed class WtbBank
     public uint Table3Offset { get; set; }
     public uint Xt1Offset { get; set; }
 
-    /// <summary>When false the table3 array is omitted entirely (split `.wta`+`.wtp` banks).</summary>
+    /// <summary>When false the table3 array is omitted unless a texture claims a hash; split
+    /// `.wta`+`.wtp` banks can be authored without it.</summary>
     public bool IncludeTable3 { get; set; }
+
+    /// <summary>
+    /// Whether table3 is emitted: the bank declares one, or any texture claims a CRC32 hash (its
+    /// table2 "Has CRC32 hash" flag) or carries an explicit value. Without the second condition a
+    /// hash set on a texture in a bank opened without table3 would be silently dropped on save.
+    /// </summary>
+    private bool WriteTable3 =>
+        IncludeTable3 || _textures.Any(t => t.IsModelBankClass || t.HashMode == HashMode.Forced || t.Hash != 0);
 
     /// <summary>Base subtracted from <c>table0</c> to obtain a stream-relative offset (0 split, 0x1000 standalone).</summary>
     public uint PayloadBase { get; set; }
@@ -97,7 +106,7 @@ public sealed class WtbBank
     }
 
     public bool IsDirty => StructureDirty || _textures.Any(t => t.IsDirty) ||
-                           TableOffsetsChanged() || IncludeTable3 != (_originalT3 != 0) ||
+                           TableOffsetsChanged() || WriteTable3 != (_originalT3 != 0) ||
                            Version != _originalVersion || SyncTable1WithImageSize;
 
     private bool TableOffsetsChanged() =>
@@ -325,7 +334,7 @@ public sealed class WtbBank
             return (byte[])_originalBytes.Clone();
 
         if (!StructureDirty && TableOffsetsUnchanged() &&
-            IncludeTable3 == (_originalT3 != 0) && _originalBytes.Length > 0 &&
+            WriteTable3 == (_originalT3 != 0) && _originalBytes.Length > 0 &&
             CanPatchInPlace(out bool writePayloads))
         {
             return PatchInPlace(writePayloads);
@@ -372,7 +381,7 @@ public sealed class WtbBank
             int t2At = (int)Table2Offset + i * 4;
             if (t2At >= 0 && t2At + 4 <= output.Length)
                 tex.Table2Bytes.CopyTo(output, t2At);
-            if (IncludeTable3 && Table3Offset != 0)
+            if (WriteTable3 && Table3Offset != 0)
                 WriteU32IfRoom(output, Table3Offset + 4 * i, tex.EffectiveHash());
             int xt1At = (int)Xt1Offset + i * Xt1RecordSize;
             if (xt1At >= 0 && xt1At + Xt1RecordSize <= output.Length)
@@ -408,8 +417,9 @@ public sealed class WtbBank
         uint t0 = HeaderSize;
         uint t1 = (uint)(t0 + stride);
         uint t2 = (uint)(t1 + stride);
-        uint t3 = IncludeTable3 ? (uint)(t2 + stride) : 0u;
-        uint xt1 = IncludeTable3 ? (uint)(t3 + stride) : (uint)(t2 + stride);
+        bool writeTable3 = WriteTable3;
+        uint t3 = writeTable3 ? (uint)(t2 + stride) : 0u;
+        uint xt1 = writeTable3 ? (uint)(t3 + stride) : (uint)(t2 + stride);
         int structuralEnd = checked((int)xt1 + count * Xt1RecordSize);
 
         Table0Offset = t0;
@@ -463,7 +473,7 @@ public sealed class WtbBank
             Mem.WriteU32LE(output, (int)t1 + 4 * i, size);
             int t2At = (int)t2 + i * 4;
             tex.Table2Bytes.CopyTo(output, t2At);
-            if (IncludeTable3)
+            if (writeTable3)
                 Mem.WriteU32LE(output, (int)t3 + 4 * i, tex.EffectiveHash());
             tex.Header.Raw.CopyTo(output, (int)xt1 + i * Xt1RecordSize);
         }

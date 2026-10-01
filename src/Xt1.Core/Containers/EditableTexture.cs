@@ -147,7 +147,8 @@ public sealed class EditableTexture
 
     // --- table2 decoded bits (XT1_FORMAT.md section 4) ---
 
-    /// <summary>First table2 byte: 0x20 for model/UI bank entries, 0x00 otherwise.</summary>
+    /// <summary>First table2 byte: 0x20 when the record carries a CRC32 hash (model/UI/character
+    /// banks), 0x00 otherwise (effect banks).</summary>
     public byte Table2B0
     {
         get => Table2Bytes[0];
@@ -164,6 +165,7 @@ public sealed class EditableTexture
     /// <summary>table2 read as the big-endian u32 the spec describes.</summary>
     public uint Table2WordBE => Mem.ReadU32BE(Table2Bytes, 0);
 
+    /// <summary>The "Has CRC32 hash" flag: set when the record carries a CRC32 hash in table3.</summary>
     public bool IsModelBankClass => (Table2B0 & 0x20) != 0;
     public bool IsSrgbFlag => (Table2B3 & 0x04) != 0;
 

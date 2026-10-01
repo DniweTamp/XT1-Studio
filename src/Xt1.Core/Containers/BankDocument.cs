@@ -162,8 +162,9 @@ public sealed class BankDocument
     /// <summary>
     /// Author a brand-new empty bank. A split bank is a `.wta` header with a matching `.wtp` payload
     /// stream (the layout used by most banks in the game, not just effects); a standalone is a single
-    /// `.wtb` with its payload inline. DAT containers are not authored here (the user can still open
-    /// and edit existing ones).
+    /// `.wtb` with its payload inline. Both carry a table3 hash array, since textures added to a new
+    /// bank get a CRC32 hash by default and the hash has nowhere to go without it. DAT containers are
+    /// not authored here (the user can still open and edit existing ones).
     /// </summary>
     public static BankDocument CreateEmpty(BankKind kind, string headerPath)
     {
@@ -174,7 +175,7 @@ public sealed class BankDocument
         switch (kind)
         {
             case BankKind.EffectWta:
-                bank = WtbBank.CreateEmpty(includeTable3: false, standalone: false, payloadBase: 0);
+                bank = WtbBank.CreateEmpty(includeTable3: true, standalone: false, payloadBase: 0);
                 label = "wta";
                 document.PayloadSidePath = Path.ChangeExtension(headerPath, ".wtp");
                 break;

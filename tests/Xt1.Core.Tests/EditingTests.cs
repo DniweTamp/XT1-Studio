@@ -521,4 +521,62 @@ public class EditingTests
             try { Directory.Delete(directory, recursive: true); } catch { }
         }
     }
+
+    /// <summary>
+    /// A hash set on a texture added to a freshly authored split bank must survive save/reload, so
+    /// the new bank has to carry a table3 array. Without it the hash is silently dropped and reads
+    /// back as 0.
+    /// </summary>
+    [Fact]
+    public void NewSplitBank_PersistsAddedTextureHash()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "Xt1Studio", "tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "new.wta");
+            var document = BankDocument.CreateEmpty(BankKind.EffectWta, path);
+
+            var texture = EditableTexture.CreateNew(Xt1Format.Bc7Unorm, 8, 8);
+            texture.Hash = 0xDEADBEEF;
+            texture.HashMode = HashMode.Forced;
+            texture.SetModelBankClass(true);
+            document.Sections[0].Bank.Add(texture);
+
+            BankWriter.Write(document, new WriteOptions()).SaveAll();
+
+            var reloaded = BankDocument.Load(path);
+            var bank = reloaded.Sections[0].Bank;
+            Assert.True(bank.IncludeTable3);
+            Assert.Single(bank.Textures);
+            Assert.Equal(0xDEADBEEFu, bank.Textures[0].Hash);
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// A bank opened without a table3 array (`t3 == 0`, e.g. an effect bank) must start writing one
+    /// as soon as a texture claims a CRC32 hash; otherwise a hash set in the UI is silently dropped.
+    /// </summary>
+    [Fact]
+    public void BankWithoutTable3_AddsItWhenATextureClaimsAHash()
+    {
+        var bank = WtbBank.CreateEmpty(includeTable3: false, standalone: false, payloadBase: 0);
+        var texture = EditableTexture.CreateNew(Xt1Format.Bc7Unorm, 8, 8);
+        bank.Add(texture);
+
+        // With no hash claimed yet, the bank stays table3-less.
+        Assert.False(WtbBank.Parse(bank.ToBytes()).IncludeTable3);
+
+        texture.SetModelBankClass(true);
+        texture.Hash = 0x12345678;
+        texture.HashMode = HashMode.Forced;
+
+        var reparsed = WtbBank.Parse(bank.ToBytes());
+        Assert.True(reparsed.IncludeTable3);
+        Assert.Equal(0x12345678u, reparsed.Textures[0].Hash);
+    }
 }

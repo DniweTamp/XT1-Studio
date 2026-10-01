@@ -42,7 +42,7 @@ public partial class MainWindow
         get
         {
             string hash = _selected is null ? "none" : $"0x{_selected.Hash:X8}";
-            string flags = $"model={ModelCheck.IsChecked == true} srgb={SrgbCheck.IsChecked == true} " +
+            string flags = $"hashflag={ModelCheck.IsChecked == true} srgb={SrgbCheck.IsChecked == true} " +
                            $"cube={CubeCheck.IsChecked == true}";
             return $"advanced={AdvancedToggle.IsChecked == true} hash={hash} flags={flags}";
         }

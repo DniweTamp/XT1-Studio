@@ -371,7 +371,7 @@ a 3D volume carries every depth slice of each level and writes `resourceDimensio
   have no mips). Runs on the loaded document or over a folder of `.dat`/`.wta`/`.wtb`/`.xt1` files with
   an optional recursive scan.
 - WTB sRGB/cubemap flags can be kept in step with a texture's format on add/replace (on by default),
-  and new textures default to the model/UI bank class.
+  and new textures default to having a CRC32 hash (the "Has CRC32 hash" flag).
 - Undo/redo across field edits, raw byte edits, add/delete and re-encode.
 - Save is diff-preserving and atomic: unchanged sub-files, tables and reserved bytes are written
   back byte-for-byte, all outputs are staged next to their destinations first, and the payload

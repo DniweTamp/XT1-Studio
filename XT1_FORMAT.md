@@ -171,12 +171,12 @@ LE `u32`, equals the `XT1.imageSize` of the same index. `align4096(max(table0+ta
 equals the decompressed payload stream size.
 
 ### table2 — flags **[verified bytes]**
-4 bytes; read as raw bytes `[b0][b1][b2][b3]`. `b1` and `b2` are **always 0**; `b0` is the
-bank class and `b3` is a small flag set:
+4 bytes; read as raw bytes `[b0][b1][b2][b3]`. `b1` and `b2` are **always 0**; `b0` records
+whether the record carries a CRC32 hash and `b3` is a small flag set:
 
 | byte | bit | meaning |
 |---|---|---|
-| `b0` | `0x20` | model/UI/character bank (`.dat`); `0x00` = effect bank (`.wta`) |
+| `b0` | `0x20` | has CRC32 hash (model/UI/character banks, `.dat`); `0x00` = no hash (effect banks, `.wta`) |
 | `b3` | `0x60` | base bits, always set |
 | `b3` | `0x04` | sRGB (duplicates the format's sRGB bit) |
 | `b3` | `0x08` | format is `0x01` (`"af"`, single-channel 8 bpp). Originally read as "second-layer compressed"; `0x01` payloads are in fact uncompressed (see §8 correction) |
@@ -674,7 +674,7 @@ def get_addr_block_linear(x, y, width_blocks, bpp, base, block_height):
    wrong off the shipped sizes). Without it the sizes and low-mip swizzle are wrong.
 8. **The hash table (`0x18`) is real** and is `crc32(name) & 0x7FFFFFFF` (LE). It is absent in
    effect banks (`0x18 == 0`) and present in model/UI banks; materials bind textures by it.
-9. **table2 is a 4-byte flag field**: `b0` = bank class, and `b3` = `0x60` base plus
+9. **table2 is a 4-byte flag field**: `b0` = has CRC32 hash, and `b3` = `0x60` base plus
    `0x04` sRGB, `0x08` compressed, `0x80` cube-usage. `b1`/`b2` are always 0. It carries a
    cube hint but **no alpha-clip bit**; the exact 2D/cube value is `textureType` (`0x18`),
    and the per-texture flag is `0x2C` (§9). Preserve all of them.

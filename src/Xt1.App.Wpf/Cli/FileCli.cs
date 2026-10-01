@@ -302,7 +302,7 @@ internal static class FileCli
             return 1;
         }
 
-        // Mirror the shell: new textures are model/UI class and derive their hash from the name.
+        // Mirror the shell: new textures carry a CRC32 hash and derive it from the name.
         string name = CliOptions.Get(options, "--name") ?? Path.GetFileNameWithoutExtension(input);
         texture.Name = name;
         texture.HashMode = HashMode.AutoFromName;
