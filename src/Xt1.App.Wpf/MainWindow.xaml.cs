@@ -213,6 +213,7 @@ public partial class MainWindow : Window
         UpdateThemeIcon();
         UpdateUndoRedo();
         SetAssetLevel(App.Settings.AssetBrowserLevel, persist: false, rebuild: false);
+        PruneRecent();
 
         var args = Environment.GetCommandLineArgs();
         var file = args.Skip(1).FirstOrDefault(File.Exists);
@@ -336,6 +337,84 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) == true) LoadDocument(dialog.FileName);
     }
 
+    // --- recent files -------------------------------------------------------------------
+
+    private const int RecentFileLimit = 8;
+
+    private void OnAppFileMenuOpened(object sender, RoutedEventArgs e) => RebuildRecentMenu();
+
+    /// <summary>
+    /// Rebuild "Open Recent" from the stored paths. Entries are only removed at startup, so a path
+    /// that is briefly unavailable (a disconnected network or removable drive) is greyed out here
+    /// rather than dropped from history.
+    /// </summary>
+    private void RebuildRecentMenu()
+    {
+        var files = App.Settings.RecentFiles ?? new List<string>();
+
+        MenuOpenRecent.Items.Clear();
+        MenuOpenRecent.Visibility = files.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (files.Count == 0) return;
+
+        foreach (var path in files)
+        {
+            bool exists = File.Exists(path);
+            var item = new MenuItem
+            {
+                Header = Path.GetFileName(path),
+                ToolTip = exists ? path : path + "  (file not found)",
+                Tag = path,
+                IsEnabled = exists,
+            };
+            item.Click += OnOpenRecent;
+            MenuOpenRecent.Items.Add(item);
+        }
+
+        MenuOpenRecent.Items.Add(new Separator { Style = (Style)FindResource("MenuSeparator") });
+        var clear = new MenuItem { Header = "Clear recent list" };
+        clear.Click += OnClearRecent;
+        MenuOpenRecent.Items.Add(clear);
+    }
+
+    private void OnOpenRecent(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string path }) LoadDocument(path);
+    }
+
+    private void OnClearRecent(object sender, RoutedEventArgs e)
+    {
+        App.Settings.RecentFiles = new List<string>();
+        App.Settings.Save();
+        RebuildRecentMenu();
+    }
+
+    /// <summary>Move a path to the front of "Open Recent" (de-duplicated, capped) and persist it.</summary>
+    private void RecordRecent(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        string full;
+        try { full = Path.GetFullPath(path); }
+        catch { return; }
+
+        var files = App.Settings.RecentFiles ?? new List<string>();
+        files.RemoveAll(p => string.Equals(p, full, StringComparison.OrdinalIgnoreCase));
+        files.Insert(0, full);
+        if (files.Count > RecentFileLimit)
+            files.RemoveRange(RecentFileLimit, files.Count - RecentFileLimit);
+
+        App.Settings.RecentFiles = files;
+        App.Settings.Save();
+    }
+
+    /// <summary>Drop entries whose file no longer exists (called once at startup).</summary>
+    private void PruneRecent()
+    {
+        var files = App.Settings.RecentFiles;
+        if (files is null) return;
+        if (files.RemoveAll(p => !File.Exists(p)) > 0) App.Settings.Save();
+    }
+
     private void OnMenuNewBank(object sender, RoutedEventArgs e)
     {
         var dialog = new NewBankDialog { Owner = this };
@@ -355,7 +434,7 @@ public partial class MainWindow : Window
             var kind = dialog.Standalone ? BankKind.StandaloneWtb : BankKind.EffectWta;
             AdoptDocument(BankDocument.CreateEmpty(kind, save.FileName));
             App.Settings.LastDirectory = Path.GetDirectoryName(save.FileName);
-            App.Settings.Save();
+            RecordRecent(save.FileName); // also persists LastDirectory with the updated history
             StatusLeft.Text = $"New empty {(dialog.Standalone ? "standalone WTB" : "split WTA")} bank - " +
                               "right-click the bank in the tree and choose \"Add texture from image...\", then Save.";
         }
@@ -597,6 +676,7 @@ public partial class MainWindow : Window
         target.NvttCliPath = source.NvttCliPath;
         target.NvttDefaultApplied = source.NvttDefaultApplied;
         target.LastDirectory = source.LastDirectory;
+        target.RecentFiles = source.RecentFiles is null ? null : new List<string>(source.RecentFiles);
     }
 
     private void OnThemeButtonClick(object sender, RoutedEventArgs e) => SetTheme(NextTheme(App.Settings.Theme));
@@ -1130,7 +1210,7 @@ public partial class MainWindow : Window
 
         AdoptDocument(document);
         App.Settings.LastDirectory = Path.GetDirectoryName(path);
-        App.Settings.Save();
+        RecordRecent(path); // also persists LastDirectory with the updated history
 
         StatusLeft.Text = document.Warnings.Count == 0
             ? $"Loaded {document.DisplayName}"

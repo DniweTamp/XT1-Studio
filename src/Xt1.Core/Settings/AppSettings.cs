@@ -95,6 +95,13 @@ public sealed class AppSettings
 
     public string? LastDirectory { get; set; }
 
+    /// <summary>
+    /// Recently opened or created document paths, newest first. Entries whose file no longer exists
+    /// are pruned at startup. Nullable so an older config with no history is distinct from an
+    /// explicitly cleared one.
+    /// </summary>
+    public List<string>? RecentFiles { get; set; }
+
     /// <summary>The folder holding <c>settings.json</c>: the executable's own directory, so the tool
     /// stays portable and its state travels with it.</summary>
     [JsonIgnore]

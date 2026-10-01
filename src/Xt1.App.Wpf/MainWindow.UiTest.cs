@@ -43,6 +43,23 @@ public partial class MainWindow
 
     internal string UiTestStatus => StatusLeft.Text ?? string.Empty;
 
+    /// <summary>The "Open Recent" entries as "label|path" lines, for the headless smoke.</summary>
+    internal IReadOnlyList<string> UiTestRecentItems()
+    {
+        RebuildRecentMenu();
+        return MenuOpenRecent.Items.OfType<MenuItem>()
+            .Where(item => item.Tag is string)
+            .Select(item => $"{item.Header}|{item.Tag}")
+            .ToList();
+    }
+
+    /// <summary>Clear the recent list and return whether the submenu is still shown.</summary>
+    internal bool UiTestClearRecent()
+    {
+        OnClearRecent(this, new RoutedEventArgs());
+        return MenuOpenRecent.Visibility == Visibility.Visible;
+    }
+
     internal string UiTestInspectorState
     {
         get

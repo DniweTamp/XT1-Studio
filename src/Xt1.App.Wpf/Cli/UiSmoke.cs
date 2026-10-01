@@ -236,6 +236,15 @@ internal static class UiSmoke
                         dummyState.Contains("ASTC_LDR_8x8") && dummyState.Contains("8x8 m1"), dummyState);
                     Step("dummy out done");
 
+                    // Open Recent lists a file that was loaded earlier in this run.
+                    Step("--- open recent ---");
+                    var recent = window.UiTestRecentItems();
+                    log($"       open recent: {string.Join(", ", recent)}");
+                    Expect("open recent lists the loaded bank",
+                        recent.Any(entry => entry.Contains("pl0080.dat")), string.Join(", ", recent));
+                    Expect("clearing open recent hides the submenu", !window.UiTestClearRecent(), "still visible");
+                    Step("open recent done");
+
                     // A brand-new empty bank must still offer "Add texture".
                     Step("--- empty bank ---");
                     window.UiTestCreateEmptyBank(standalone: false);

@@ -22,8 +22,9 @@
             <StackPanel Orientation="Horizontal" Margin="6,3">
                 <Button Style="{StaticResource MenuTopButton}" Content="File" Click="OnOpenMenu">
                     <Button.ContextMenu>
-                        <ContextMenu>
+                        <ContextMenu Opened="OnAppFileMenuOpened">
                             <MenuItem Header="Open..." Click="OnMenuOpenFile" InputGestureText="Ctrl+O" />
+                            <MenuItem x:Name="MenuOpenRecent" Header="Open Recent" />
                             <MenuItem Header="New empty bank..." Click="OnMenuNewBank" />
                             <MenuItem Header="Reload" Click="OnMenuReload" />
                             <Separator Style="{StaticResource MenuSeparator}" />

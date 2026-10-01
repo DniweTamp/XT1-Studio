@@ -279,6 +279,7 @@ public partial class SettingsDialog : ThemedDialog
         NvttCliPath = s.NvttCliPath,
         NvttDefaultApplied = s.NvttDefaultApplied,
         LastDirectory = s.LastDirectory,
+        RecentFiles = s.RecentFiles is null ? null : new List<string>(s.RecentFiles),
     };
 
 

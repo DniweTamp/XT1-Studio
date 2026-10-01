@@ -81,4 +81,27 @@ public class AppSettingsTests
             else File.WriteAllBytes(path, backup);
         }
     }
+
+    /// <summary>The Open Recent history survives a save/load, newest first.</summary>
+    [Fact]
+    public void RecentFiles_RoundTripThroughSettingsFile()
+    {
+        var path = AppSettings.SettingsPath;
+        var backup = File.Exists(path) ? File.ReadAllBytes(path) : null;
+        try
+        {
+            var saved = new AppSettings
+            {
+                RecentFiles = new List<string> { @"C:\banks\one.dat", @"C:\banks\two.wta" },
+            };
+
+            Assert.True(saved.Save(out var error), error);
+            Assert.Equal(saved.RecentFiles, AppSettings.Load().RecentFiles);
+        }
+        finally
+        {
+            if (backup is null) File.Delete(path);
+            else File.WriteAllBytes(path, backup);
+        }
+    }
 }
