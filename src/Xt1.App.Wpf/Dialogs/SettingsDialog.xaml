@@ -10,159 +10,210 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" Padding="18,16,18,6">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" MinWidth="260" />
-                    <ColumnDefinition Width="16" />
-                    <ColumnDefinition Width="*" MinWidth="260" />
-                </Grid.ColumnDefinitions>
+        <TabControl Grid.Row="0" Style="{StaticResource UnderlineTabControl}" Background="Transparent"
+                    Margin="10,10,10,0">
+            <TabItem Style="{StaticResource UnderlineTabItem}">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource IconTextSmall}" Text="&#xE713;" />
+                        <TextBlock Text="General" Margin="7,0,0,0" />
+                    </StackPanel>
+                </TabItem.Header>
 
-                <!-- Left column: encoder/native tools on top, Explorer integration below. -->
-                <StackPanel Grid.Column="0">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="8,10,8,6">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" MinWidth="260" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="*" MinWidth="260" />
+                        </Grid.ColumnDefinitions>
 
-                    <Border Style="{StaticResource Card}">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="14,12,14,0">
-                                <TextBlock Style="{StaticResource IconText}" Text="&#xE943;" />
-                                <TextBlock Style="{StaticResource SectionHeader}" Text="Encoder"
-                                           VerticalAlignment="Center" Margin="9,0,0,0" />
-                            </StackPanel>
+                        <!-- Left column: encoder/native tools on top, Explorer integration below. -->
+                        <StackPanel Grid.Column="0">
 
-                            <StackPanel Margin="14,0,14,14">
-                                <!-- Encoder verdict as reported by the shell, shown like a read-only field. -->
-                                <Border x:Name="EncoderStatusBox" Background="{DynamicResource Brush.Input}"
-                                        BorderBrush="{DynamicResource Brush.Border}"
-                                        BorderThickness="1" CornerRadius="8" Padding="9,7" Margin="0,10,0,0">
-                                    <TextBlock x:Name="EncoderText" TextWrapping="Wrap"
-                                               Foreground="{DynamicResource Brush.Text}" />
-                                </Border>
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="14,12,14,0">
+                                        <TextBlock Style="{StaticResource IconText}" Text="&#xE943;" />
+                                        <TextBlock Style="{StaticResource SectionHeader}" Text="Encoder"
+                                                   VerticalAlignment="Center" Margin="9,0,0,0" />
+                                    </StackPanel>
 
-                                <TextBlock Text="nvtt30205.dll" Foreground="{DynamicResource Brush.Muted}"
-                                           Margin="0,12,0,4" />
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox x:Name="NvttDllBox" Grid.Column="0" Style="{StaticResource FieldBox}"
-                                             Margin="0,0,8,0" TextChanged="OnNvttDllChanged"
-                                             ToolTip="Optional. Point at NVIDIA Texture Tools' nvtt30205.dll to use NVTT for encoding; leave blank to auto-detect it." />
-                                    <Button Grid.Column="1" Style="{StaticResource PillButton}"
-                                            Content="Browse..." Click="OnBrowseNvtt" />
-                                </Grid>
-                                <TextBlock x:Name="EncoderHint" Style="{StaticResource DialogHint}" Margin="0,6,0,0" />
+                                    <StackPanel Margin="14,0,14,14">
+                                        <!-- Encoder verdict as reported by the shell, shown like a read-only field. -->
+                                        <Border x:Name="EncoderStatusBox" Background="{DynamicResource Brush.Input}"
+                                                BorderBrush="{DynamicResource Brush.Border}"
+                                                BorderThickness="1" CornerRadius="8" Padding="9,7" Margin="0,10,0,0">
+                                            <TextBlock x:Name="EncoderText" TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource Brush.Text}" />
+                                        </Border>
 
-                                <!-- Informational callout, outlined with the shared theme brushes. -->
-                                <Border Background="{DynamicResource Brush.Control}" BorderBrush="{DynamicResource Brush.Border}"
-                                        BorderThickness="1" CornerRadius="8" Padding="10,9" Margin="0,12,0,0">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Style="{StaticResource IconText}" Text="&#xE946;"
-                                                   Foreground="{DynamicResource Brush.Accent}" VerticalAlignment="Top"
-                                                   Margin="0,1,0,0" />
-                                        <TextBlock Grid.Column="1" Style="{StaticResource DialogHint}" Margin="9,0,0,0"
-                                                   Text="Optional: NVTT gives faster, higher-quality encodes and is the only way to encode BC6H; without it the built-in encoder is used. Leave blank to look in the app folder, then the NVIDIA Texture Tools install directory, then PATH." />
-                                    </Grid>
-                                </Border>
-                            </StackPanel>
+                                        <TextBlock Text="nvtt30205.dll" Foreground="{DynamicResource Brush.Muted}"
+                                                   Margin="0,12,0,4" />
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox x:Name="NvttDllBox" Grid.Column="0" Style="{StaticResource FieldBox}"
+                                                     Margin="0,0,8,0" TextChanged="OnNvttDllChanged"
+                                                     ToolTip="Optional. Point at NVIDIA Texture Tools' nvtt30205.dll to use NVTT for encoding; leave blank to auto-detect it." />
+                                            <Button Grid.Column="1" Style="{StaticResource PillButton}"
+                                                    Content="Browse..." Click="OnBrowseNvtt" />
+                                        </Grid>
+                                        <TextBlock x:Name="EncoderHint" Style="{StaticResource DialogHint}" Margin="0,6,0,0" />
+
+                                        <!-- Informational callout, outlined with the shared theme brushes. -->
+                                        <Border Background="{DynamicResource Brush.Control}" BorderBrush="{DynamicResource Brush.Border}"
+                                                BorderThickness="1" CornerRadius="8" Padding="10,9" Margin="0,12,0,0">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Style="{StaticResource IconText}" Text="&#xE946;"
+                                                           Foreground="{DynamicResource Brush.Accent}" VerticalAlignment="Top"
+                                                           Margin="0,1,0,0" />
+                                                <TextBlock Grid.Column="1" Style="{StaticResource DialogHint}" Margin="9,0,0,0"
+                                                           Text="Optional: NVTT gives faster, higher-quality encodes and is the only way to encode BC6H; without it the built-in encoder is used. Leave blank to look in the app folder, then the NVIDIA Texture Tools install directory, then PATH." />
+                                            </Grid>
+                                        </Border>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}" Margin="0,12,0,0">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="14,12,14,0">
+                                        <TextBlock Style="{StaticResource IconText}" Text="&#xE8B7;" />
+                                        <TextBlock Style="{StaticResource SectionHeader}" Text="Explorer"
+                                                   VerticalAlignment="Center" Margin="9,0,0,0" />
+                                    </StackPanel>
+
+                                    <StackPanel Margin="14,0,14,14">
+                                        <Grid Margin="0,10,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="Thumbnails for .xt1" TextWrapping="Wrap"
+                                                       Foreground="{DynamicResource Brush.Muted}" VerticalAlignment="Center" />
+                                            <Button x:Name="ShellButton" Grid.Column="1" Style="{StaticResource PillButton}"
+                                                    Content="Register" MinWidth="110" Margin="8,0,0,0" Click="OnToggleShell" />
+                                        </Grid>
+
+                                        <Grid Margin="0,10,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <CheckBox x:Name="ShellMachineCheck" Grid.Column="0" Style="{StaticResource PillCheckBox}"
+                                                      HorizontalAlignment="Left"
+                                                      Content="For all users on this machine (needs an administrator)" />
+                                            <TextBlock Grid.Column="1" Style="{StaticResource IconText}" Text="&#xE72E;"
+                                                       VerticalAlignment="Center" Margin="8,0,2,0"
+                                                       ToolTip="Requires an elevated process" />
+                                        </Grid>
+
+                                        <TextBlock x:Name="ShellStatus" Style="{StaticResource DialogHint}" Margin="0,8,0,0" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
+
+                        <!-- Right column: format defaults, then preview defaults. -->
+                        <StackPanel Grid.Column="2">
+
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="14,12,14,0">
+                                        <TextBlock Style="{StaticResource IconText}" Text="&#xE8A5;" />
+                                        <TextBlock Style="{StaticResource SectionHeader}" Text="Format"
+                                                   VerticalAlignment="Center" Margin="9,0,0,0" />
+                                    </StackPanel>
+
+                                    <StackPanel Margin="14,0,14,14">
+                                        <TextBlock Text="Default import format" Foreground="{DynamicResource Brush.Muted}"
+                                                   Margin="0,10,0,4" />
+                                        <ComboBox x:Name="FormatCombo" Style="{StaticResource PillComboBox}"
+                                                  HorizontalAlignment="Stretch" />
+
+                                        <CheckBox x:Name="SyncCheck" Style="{StaticResource PillCheckBox}" HorizontalAlignment="Left"
+                                                  Margin="0,10,0,0" Content="Sync WTB sRGB / cubemap flags from the format"
+                                                  ToolTip="On add or replace, copy the sRGB and cubemap flags from the chosen texture format into the WTB flags." />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}" Margin="0,12,0,0">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="14,12,14,0">
+                                        <TextBlock Style="{StaticResource IconText}" Text="&#xE890;" />
+                                        <TextBlock Style="{StaticResource SectionHeader}" Text="Preview"
+                                                   VerticalAlignment="Center" Margin="9,0,0,0" />
+                                    </StackPanel>
+
+                                    <StackPanel Margin="14,0,14,14">
+                                        <CheckBox x:Name="OpaqueAlphaCheck" Style="{StaticResource PillCheckBox}"
+                                                  Content="Start with opaque alpha (ignore stored alpha)" HorizontalAlignment="Left"
+                                                  Margin="0,10,0,4" />
+                                        <CheckBox x:Name="ShowAlphaCheck" Style="{StaticResource PillCheckBox}"
+                                                  Content="Offer the alpha-only option in the channel selector" HorizontalAlignment="Left"
+                                                  Margin="0,0,0,12" />
+
+                                        <TextBlock Text="Volume preview cap" Foreground="{DynamicResource Brush.Muted}"
+                                                   Margin="0,0,0,4" />
+                                        <TextBox x:Name="VolumeCapBox" Style="{StaticResource FieldBox}"
+                                                 HorizontalAlignment="Stretch" TextChanged="OnVolumeCapChanged" />
+                                        <TextBlock x:Name="VolumeCapHint" Style="{StaticResource DialogHint}" Margin="0,5,0,0"
+                                                   Text="Larger 3D volumes are downscaled for the GPU preview only." />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+                </ScrollViewer>
+            </TabItem>
+
+            <TabItem Style="{StaticResource UnderlineTabItem}">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource IconTextSmall}" Text="&#xE8A5;" />
+                        <TextBlock Text="Import formats" Margin="7,0,0,0" />
+                    </StackPanel>
+                </TabItem.Header>
+
+                <Grid Margin="8,10,8,6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Style="{StaticResource DialogHint}" VerticalAlignment="Center"
+                                   Text="Tick the formats the import dialog should offer. Unticked formats stay hidden when importing or replacing a texture." />
+                        <Button Grid.Column="1" Style="{StaticResource PillButton}" Content="All"
+                                Margin="8,0,0,0" Click="OnFormatSelectAll" />
+                        <Button Grid.Column="2" Style="{StaticResource PillButton}" Content="None"
+                                Margin="8,0,0,0" Click="OnFormatSelectNone" />
+                    </Grid>
+
+                    <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,10,0,0">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="14,12,14,12">
+                            <StackPanel x:Name="FormatList" />
+                        </ScrollViewer>
                     </Border>
 
-                    <Border Style="{StaticResource Card}" Margin="0,12,0,0">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="14,12,14,0">
-                                <TextBlock Style="{StaticResource IconText}" Text="&#xE8B7;" />
-                                <TextBlock Style="{StaticResource SectionHeader}" Text="Explorer"
-                                           VerticalAlignment="Center" Margin="9,0,0,0" />
-                            </StackPanel>
-
-                            <StackPanel Margin="14,0,14,14">
-                                <Grid Margin="0,10,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Thumbnails for .xt1" TextWrapping="Wrap"
-                                               Foreground="{DynamicResource Brush.Muted}" VerticalAlignment="Center" />
-                                    <Button x:Name="ShellButton" Grid.Column="1" Style="{StaticResource PillButton}"
-                                            Content="Register" MinWidth="110" Margin="8,0,0,0" Click="OnToggleShell" />
-                                </Grid>
-
-                                <Grid Margin="0,10,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <CheckBox x:Name="ShellMachineCheck" Grid.Column="0" Style="{StaticResource PillCheckBox}"
-                                              HorizontalAlignment="Left"
-                                              Content="For all users on this machine (needs an administrator)" />
-                                    <TextBlock Grid.Column="1" Style="{StaticResource IconText}" Text="&#xE72E;"
-                                               VerticalAlignment="Center" Margin="8,0,2,0"
-                                               ToolTip="Requires an elevated process" />
-                                </Grid>
-
-                                <TextBlock x:Name="ShellStatus" Style="{StaticResource DialogHint}" Margin="0,8,0,0" />
-                            </StackPanel>
-                        </StackPanel>
-                    </Border>
-                </StackPanel>
-
-                <!-- Right column: format defaults, then preview defaults. -->
-                <StackPanel Grid.Column="2">
-
-                    <Border Style="{StaticResource Card}">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="14,12,14,0">
-                                <TextBlock Style="{StaticResource IconText}" Text="&#xE8A5;" />
-                                <TextBlock Style="{StaticResource SectionHeader}" Text="Format"
-                                           VerticalAlignment="Center" Margin="9,0,0,0" />
-                            </StackPanel>
-
-                            <StackPanel Margin="14,0,14,14">
-                                <TextBlock Text="Default import format" Foreground="{DynamicResource Brush.Muted}"
-                                           Margin="0,10,0,4" />
-                                <ComboBox x:Name="FormatCombo" Style="{StaticResource PillComboBox}"
-                                          HorizontalAlignment="Stretch" />
-
-                                <CheckBox x:Name="SyncCheck" Style="{StaticResource PillCheckBox}" HorizontalAlignment="Left"
-                                          Margin="0,10,0,0" Content="Sync WTB sRGB / cubemap flags from the format"
-                                          ToolTip="On add or replace, copy the sRGB and cubemap flags from the chosen texture format into the WTB flags." />
-                            </StackPanel>
-                        </StackPanel>
-                    </Border>
-
-                    <Border Style="{StaticResource Card}" Margin="0,12,0,0">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="14,12,14,0">
-                                <TextBlock Style="{StaticResource IconText}" Text="&#xE890;" />
-                                <TextBlock Style="{StaticResource SectionHeader}" Text="Preview"
-                                           VerticalAlignment="Center" Margin="9,0,0,0" />
-                            </StackPanel>
-
-                            <StackPanel Margin="14,0,14,14">
-                                <CheckBox x:Name="OpaqueAlphaCheck" Style="{StaticResource PillCheckBox}"
-                                          Content="Start with opaque alpha (ignore stored alpha)" HorizontalAlignment="Left"
-                                          Margin="0,10,0,4" />
-                                <CheckBox x:Name="ShowAlphaCheck" Style="{StaticResource PillCheckBox}"
-                                          Content="Offer the alpha-only option in the channel selector" HorizontalAlignment="Left"
-                                          Margin="0,0,0,12" />
-
-                                <TextBlock Text="Volume preview cap" Foreground="{DynamicResource Brush.Muted}"
-                                           Margin="0,0,0,4" />
-                                <TextBox x:Name="VolumeCapBox" Style="{StaticResource FieldBox}"
-                                         HorizontalAlignment="Stretch" TextChanged="OnVolumeCapChanged" />
-                                <TextBlock x:Name="VolumeCapHint" Style="{StaticResource DialogHint}" Margin="0,5,0,0"
-                                           Text="Larger 3D volumes are downscaled for the GPU preview only." />
-                            </StackPanel>
-                        </StackPanel>
-                    </Border>
-                </StackPanel>
-            </Grid>
-        </ScrollViewer>
+                    <TextBlock x:Name="FormatHint" Grid.Row="2" Style="{StaticResource DialogHint}" Margin="2,8,0,0" />
+                </Grid>
+            </TabItem>
+        </TabControl>
 
         <Border Grid.Row="1" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="18,10">
             <StackPanel Style="{StaticResource DialogButtonRow}">

@@ -130,6 +130,25 @@ public class FormatTests
         }
     }
 
+    /// <summary>
+    /// The encodable list is what the import dialog offers and what its settings filter narrows, so it
+    /// must hold exactly the BC/ASTC/Raw codecs, in id order, and exclude decode-only formats.
+    /// </summary>
+    [Fact]
+    public void Encodable_MatchesTheImportDialogFilter()
+    {
+        var encodable = FormatTable.Encodable;
+        Assert.NotEmpty(encodable);
+        Assert.All(encodable, f => Assert.True(f.Codec is CodecKind.Bc or CodecKind.Astc or CodecKind.Raw));
+        Assert.Contains(encodable, f => f.Format == Xt1Format.Bc7Unorm);
+        // BC6H is encode-only through NVTT, so it must stay in the list even though the managed path
+        // cannot encode it.
+        Assert.Contains(encodable, f => f.Format == Xt1Format.Bc6hUf16);
+        Assert.Contains(encodable, f => f.Format == Xt1Format.Astc8x8Srgb);
+        Assert.DoesNotContain(encodable, f => f.Codec == CodecKind.Unsupported);
+        Assert.Equal(encodable.OrderBy(f => f.Value).Select(f => f.Format), encodable.Select(f => f.Format));
+    }
+
     [Fact]
     public void Bc7_IsTheOnlyBc7TargetFormat()
     {

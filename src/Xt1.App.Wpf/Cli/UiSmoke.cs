@@ -248,6 +248,23 @@ internal static class UiSmoke
                     Pump(10);
                     Step("export dialog closed");
 
+                    // The settings dialog: shown so its tabs and the code-built import-format list load.
+                    Step("--- settings dialog ---");
+                    var settingsDialog = new SettingsDialog(App.Settings, window.UiTestBackendState, false)
+                    {
+                        Owner = window,
+                    };
+                    settingsDialog.Show();
+                    Pump(20);
+                    var settingsState = settingsDialog.UiTestState();
+                    log($"       settings dialog: {settingsState}");
+                    Expect("the settings dialog offers the import-format list",
+                        settingsState.StartsWith("formats=") && !settingsState.StartsWith("formats=0")
+                        && settingsState.Contains("hint=True"), settingsState);
+                    settingsDialog.Close();
+                    Pump(10);
+                    Step("settings dialog closed");
+
 
                     // The 3D viewport's shared controls, through the same selection path a user takes.
                     // The original bank is reloaded first, since the empty-bank phase replaced it.

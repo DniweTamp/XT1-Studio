@@ -18,4 +18,47 @@ public class AppSettingsTests
         Assert.Equal(0x8Eu, (uint)settings.DefaultImportFormat);
         Assert.True(settings.SyncFlagsFromFormat);
     }
+
+    /// <summary>No recorded filter means the import dialog offers every encodable format, which is how
+    /// an older settings file (without the field) must behave.</summary>
+    [Fact]
+    public void ImportFormats_DefaultToNoFilter()
+    {
+        Assert.Null(new AppSettings().ImportFormats);
+    }
+
+    /// <summary>
+    /// The format filter survives a save/load round trip even when it holds an id this build does not
+    /// define (a settings file from a newer version). Because the entries are written as numbers rather
+    /// than names, an unknown value is ignored instead of failing the whole load and resetting every
+    /// other setting.
+    /// </summary>
+    [Fact]
+    public void ImportFormats_RoundTripToleratesUnknownIds()
+    {
+        var path = AppSettings.SettingsPath;
+        var backup = File.Exists(path) ? File.ReadAllBytes(path) : null;
+        try
+        {
+            var saved = new AppSettings
+            {
+                DefaultImportFormat = Xt1Format.Bc7Unorm,
+                VolumeResolutionCap = 640,
+                ImportFormats = new List<Xt1Format> { Xt1Format.Bc7Unorm, (Xt1Format)0x7FFF },
+            };
+
+            Assert.True(saved.Save(out var error), error);
+            var loaded = AppSettings.Load();
+
+            // The unknown id is preserved as a value, and the rest of the configuration is intact.
+            Assert.Equal(saved.ImportFormats, loaded.ImportFormats);
+            Assert.Equal(Xt1Format.Bc7Unorm, loaded.DefaultImportFormat);
+            Assert.Equal(640, loaded.VolumeResolutionCap);
+        }
+        finally
+        {
+            if (backup is null) File.Delete(path);
+            else File.WriteAllBytes(path, backup);
+        }
+    }
 }

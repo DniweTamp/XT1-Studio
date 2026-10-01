@@ -563,6 +563,7 @@ public partial class MainWindow : Window
         var target = App.Settings;
         target.Theme = source.Theme;
         target.DefaultImportFormat = source.DefaultImportFormat;
+        target.ImportFormats = source.ImportFormats is null ? null : new List<Xt1Format>(source.ImportFormats);
         target.OpaqueAlphaByDefault = source.OpaqueAlphaByDefault;
         target.ShowAlphaChannel = source.ShowAlphaChannel;
         target.SyncFlagsFromFormat = source.SyncFlagsFromFormat;
@@ -1704,7 +1705,8 @@ public partial class MainWindow : Window
 
             var options = new TextureImportDialog(fileName, image,
                 texture.FormatInfo ?? FormatTable.Get(Xt1Format.Bc7Unorm)!, EncodeQuality.Normal,
-                generateMips: true, solidify: false, makeOpaque: false);
+                generateMips: true, solidify: false, makeOpaque: false,
+                visibleFormats: App.Settings.ImportFormats);
             options.Owner = this;
             if (options.ShowDialog() != true) return;
 
@@ -1834,7 +1836,8 @@ public partial class MainWindow : Window
                 var defaultFormat = FormatTable.Get(App.Settings.DefaultImportFormat)
                                     ?? FormatTable.Get(Xt1Format.Bc7Unorm)!;
                 var options = new TextureImportDialog(Path.GetFileName(picker.FileName), image, defaultFormat,
-                    EncodeQuality.Normal, generateMips: true, solidify: false, makeOpaque: false);
+                    EncodeQuality.Normal, generateMips: true, solidify: false, makeOpaque: false,
+                    visibleFormats: App.Settings.ImportFormats);
                 options.Owner = this;
             if (options.ShowDialog() != true) return;
 

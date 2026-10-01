@@ -37,6 +37,15 @@ public sealed class AppSettings
     public Xt1Format DefaultImportFormat { get; set; } = Xt1Format.Astc8x8Srgb;
 
     /// <summary>
+    /// Formats the import dialog offers, as a subset of <see cref="FormatTable.Encodable"/>. Null means
+    /// no filter has been recorded (a fresh install or an older config), so every encodable format is
+    /// offered. An explicit list always holds at least one format. The entries are written as numbers
+    /// rather than names, so a format added by a later build is ignored rather than failing the whole
+    /// load on an unknown name.
+    /// </summary>
+    public List<Xt1Format>? ImportFormats { get; set; }
+
+    /// <summary>
     /// Preselect the "opaque alpha" viewer toggle. On by default: most of the game's textures are
     /// UNORM/BC payloads whose fourth channel carries no display information, and compositing those
     /// over the checkerboard hides the RGB the user actually wants to inspect. Untick it (or use the

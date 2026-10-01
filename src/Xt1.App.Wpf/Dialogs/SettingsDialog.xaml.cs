@@ -11,9 +11,10 @@ using Xt1.Core.Settings;
 namespace Xt1.App.Wpf.Dialogs;
 
 /// <summary>
-/// Encoder/import defaults, preview defaults and the Explorer thumbnail registration. Edits a copy of
-/// the live settings; the caller reads <see cref="Result"/> after OK. Registration itself changes
-/// machine state immediately, like the WinForms dialog, and is not part of <see cref="Result"/>.
+/// Encoder defaults, the import dialog's format filter, preview defaults and the Explorer thumbnail
+/// registration. Edits a copy of the live settings; the caller reads <see cref="Result"/> after OK.
+/// Registration itself changes machine state immediately, like the WinForms dialog, and is not part
+/// of <see cref="Result"/>.
 /// </summary>
 public partial class SettingsDialog : ThemedDialog
 {
@@ -22,7 +23,8 @@ public partial class SettingsDialog : ThemedDialog
     private const int VolumeCapStep = 64;
     private const string VolumeHintText = "Larger 3D volumes are downscaled for the GPU preview only.";
 
-    private readonly List<FormatInfo> _formats;
+    private readonly List<FormatInfo> _formats = new();
+    private readonly Dictionary<Xt1Format, CheckBox> _formatChecks = new();
 
     /// <summary>A copy of the settings passed in, updated in place when the user accepts.</summary>
     public AppSettings Result { get; }
@@ -41,13 +43,7 @@ public partial class SettingsDialog : ThemedDialog
         NvttDllBox.Text = Result.NvttDllPath ?? string.Empty;
         UpdateNvttHint();
 
-        _formats = FormatTable.All
-            .Where(f => f.Codec is CodecKind.Bc or CodecKind.Astc or CodecKind.Raw)
-            .OrderBy(f => f.Value)
-            .ToList();
-        FormatCombo.ItemsSource = _formats.Select(f => f.DisplayName).ToList();
-        int index = _formats.FindIndex(f => f.Format == Result.DefaultImportFormat);
-        FormatCombo.SelectedIndex = index >= 0 ? index : 0;
+        BuildFormatList();
 
         SyncCheck.IsChecked = Result.SyncFlagsFromFormat;
         OpaqueAlphaCheck.IsChecked = Result.OpaqueAlphaByDefault;
@@ -58,6 +54,131 @@ public partial class SettingsDialog : ThemedDialog
         RefreshShell();
         ShellMachineCheck.Checked += (_, _) => RefreshShell();
         ShellMachineCheck.Unchecked += (_, _) => RefreshShell();
+    }
+
+    /// <summary>
+    /// Build the "Import formats" checklist from the encodable formats, grouped by codec. A null
+    /// filter means everything is on; otherwise only the recorded formats are ticked. Built in code
+    /// because the list is long and its contents come from the format table, not from XAML.
+    /// </summary>
+    private void BuildFormatList()
+    {
+        bool all = Result.ImportFormats is null;
+        var enabled = all ? null : new HashSet<Xt1Format>(Result.ImportFormats!);
+        // A filter whose entries are all unknown to this build (a settings file from a newer version)
+        // must not open with nothing ticked: fall back to offering everything.
+        if (!all && !FormatTable.Encodable.Any(f => enabled!.Contains(f.Format)))
+        {
+            all = true;
+            enabled = null;
+        }
+
+        foreach (var group in FormatTable.Encodable
+                     .GroupBy(f => f.Codec)
+                     .OrderBy(g => g.Key switch { CodecKind.Bc => 0, CodecKind.Astc => 1, _ => 2 }))
+        {
+            FormatList.Children.Add(new TextBlock
+            {
+                Text = group.Key switch
+                {
+                    CodecKind.Bc => "Block compression (BC)",
+                    CodecKind.Astc => "Adaptive scalable texture compression (ASTC)",
+                    _ => "Uncompressed",
+                },
+                Style = (Style)FindResource("SectionHeader"),
+                Margin = new Thickness(0, FormatList.Children.Count == 0 ? 0 : 14, 0, 8),
+            });
+
+            var wrap = new WrapPanel { Orientation = Orientation.Horizontal };
+            foreach (var info in group.OrderBy(f => f.Value))
+            {
+                var check = new CheckBox
+                {
+                    Content = info.DisplayName,
+                    Style = (Style)FindResource("PillCheckBox"),
+                    Margin = new Thickness(0, 0, 8, 8),
+                    IsChecked = all || enabled!.Contains(info.Format),
+                };
+                check.Checked += OnFormatCheckChanged;
+                check.Unchecked += OnFormatCheckChanged;
+                _formatChecks[info.Format] = check;
+                wrap.Children.Add(check);
+            }
+            FormatList.Children.Add(wrap);
+        }
+
+        OnFormatSelectionChanged();
+    }
+
+    /// <summary>
+    /// Rebuild the "Default import format" combo from the ticked formats so it can never offer — or
+    /// save — a format the import dialog would hide. The previous selection is kept when it is still
+    /// enabled, otherwise the recorded default is used, otherwise the first enabled format.
+    /// </summary>
+    private void RefreshFormatCombo()
+    {
+        var previous = FormatCombo.SelectedIndex >= 0 && FormatCombo.SelectedIndex < _formats.Count
+            ? _formats[FormatCombo.SelectedIndex].Format
+            : Result.DefaultImportFormat;
+
+        _formats.Clear();
+        _formats.AddRange(FormatTable.Encodable.Where(f =>
+            _formatChecks.TryGetValue(f.Format, out var check) && check.IsChecked == true));
+
+        FormatCombo.ItemsSource = _formats.Select(f => f.DisplayName).ToList();
+        int index = _formats.FindIndex(f => f.Format == previous);
+        if (index < 0) index = _formats.FindIndex(f => f.Format == Result.DefaultImportFormat);
+        FormatCombo.SelectedIndex = index >= 0 ? index : (_formats.Count > 0 ? 0 : -1);
+    }
+
+    /// <summary>Keep the default-format combo and the count hint in step with the checklist.</summary>
+    private void OnFormatSelectionChanged()
+    {
+        RefreshFormatCombo();
+        UpdateFormatHint();
+    }
+
+    /// <summary>
+    /// A one-line summary for the headless UI smoke; constructing the dialog is what validates its XAML
+    /// and style references (including the code-built import-format checklist), so the caller only
+    /// reads this.
+    /// </summary>
+    internal string UiTestState()
+    {
+        int on = _formatChecks.Count(pair => pair.Value.IsChecked == true);
+        return $"formats={_formatChecks.Count} enabled={on} hint={!string.IsNullOrEmpty(FormatHint.Text)}";
+    }
+
+    private void OnFormatCheckChanged(object sender, RoutedEventArgs e) => OnFormatSelectionChanged();
+
+    private void OnFormatSelectAll(object sender, RoutedEventArgs e) => SetAllFormatChecks(true);
+
+    private void OnFormatSelectNone(object sender, RoutedEventArgs e) => SetAllFormatChecks(false);
+
+    private void SetAllFormatChecks(bool value)
+    {
+        foreach (var check in _formatChecks.Values) check.IsChecked = value;
+        OnFormatSelectionChanged();
+    }
+
+    /// <summary>Live count of ticked formats, warning when the selection would empty the dialog.</summary>
+    private void UpdateFormatHint()
+    {
+        if (FormatHint is null) return;
+        int on = _formatChecks.Count(pair => pair.Value.IsChecked == true);
+        int total = _formatChecks.Count;
+        if (on == 0)
+        {
+            FormatHint.Text = "At least one format must stay enabled.";
+            FormatHint.SetResourceReference(TextBlock.ForegroundProperty, "Brush.WarningText");
+        }
+        else
+        {
+            FormatHint.Text = on == total
+                ? $"All {total} formats are offered in the import dialog."
+                : $"{on} of {total} formats are offered in the import dialog.";
+            FormatHint.SetResourceReference(TextBlock.ForegroundProperty, "Brush.Muted");
+        }
     }
 
     /// <summary>
@@ -148,6 +269,7 @@ public partial class SettingsDialog : ThemedDialog
     {
         Theme = s.Theme,
         DefaultImportFormat = s.DefaultImportFormat,
+        ImportFormats = s.ImportFormats is null ? null : new List<Xt1Format>(s.ImportFormats),
         OpaqueAlphaByDefault = s.OpaqueAlphaByDefault,
         ShowAlphaChannel = s.ShowAlphaChannel,
         SyncFlagsFromFormat = s.SyncFlagsFromFormat,
@@ -187,8 +309,21 @@ public partial class SettingsDialog : ThemedDialog
             return;
         }
 
+        var chosenFormats = FormatTable.Encodable
+            .Where(f => _formatChecks.TryGetValue(f.Format, out var check) && check.IsChecked == true)
+            .Select(f => f.Format)
+            .ToList();
+        if (chosenFormats.Count == 0)
+        {
+            UpdateFormatHint();
+            return;
+        }
+
         if (FormatCombo.SelectedIndex >= 0 && FormatCombo.SelectedIndex < _formats.Count)
             Result.DefaultImportFormat = _formats[FormatCombo.SelectedIndex].Format;
+        // A full selection is stored as null ("no filter") so the settings file stays minimal and a
+        // format added by a later version is visible without the user having to revisit this tab.
+        Result.ImportFormats = chosenFormats.Count == _formatChecks.Count ? null : chosenFormats;
         Result.NvttDllPath = NullIfEmpty(NvttDllBox.Text);
         Result.SyncFlagsFromFormat = SyncCheck.IsChecked == true;
         Result.OpaqueAlphaByDefault = OpaqueAlphaCheck.IsChecked == true;

@@ -14,9 +14,19 @@ public static class FormatTable
     private static readonly List<FormatInfo> Ordered = Map.Values.OrderBy(f => f.Value).ToList();
     private static readonly FormatInfo[] Astc = Ordered.Where(f => f.Codec == CodecKind.Astc).ToArray();
 
+    /// <summary>Codec classes the import dialog offers as encode targets (BC through NVTT or managed,
+    /// ASTC and Raw through managed), i.e. what the "import formats" setting filters down.</summary>
+    private static readonly FormatInfo[] EncodableFormats = Ordered
+        .Where(f => f.Codec is CodecKind.Bc or CodecKind.Astc or CodecKind.Raw)
+        .ToArray();
+
     public static IEnumerable<FormatInfo> All => Ordered;
 
     public static IReadOnlyList<FormatInfo> AstcFormats => Astc;
+
+    /// <summary>Every format offered as an encode target, in id order. The single source of truth for
+    /// the import dialog's list and the settings that narrow it.</summary>
+    public static IReadOnlyList<FormatInfo> Encodable => EncodableFormats;
 
     public static bool TryGet(uint value, out FormatInfo info) => Map.TryGetValue(value, out info!);
 
