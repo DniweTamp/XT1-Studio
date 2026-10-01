@@ -144,11 +144,29 @@
 
                 <Border Grid.Row="0" Style="{StaticResource Card}">
                     <DockPanel>
-                        <TextBlock DockPanel.Dock="Top" Text="Asset Browser" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource Brush.Heading}" Margin="14,12,14,6" />
-                        <TreeView x:Name="DocumentTree" Margin="6,0,4,6" Background="Transparent" BorderThickness="0"
-                                  SelectedItemChanged="OnTreeSelectionChanged"
-                                  PreviewMouseRightButtonDown="OnTreePreviewMouseRightButtonDown">
+                        <Grid DockPanel.Dock="Top" Margin="14,12,14,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Asset Browser" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource Brush.Heading}" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal"
+                                        ToolTip="Asset Browser zoom (Ctrl+wheel over the tree or grid)">
+                                <TextBlock x:Name="AssetZoomLabel" Text="List" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource Brush.Muted}" MinWidth="46"
+                                           TextAlignment="Right" Margin="0,0,8,0" />
+                                <Slider x:Name="AssetZoomSlider" Style="{StaticResource TimeBarSlider}"
+                                        Width="132" Orientation="Horizontal" Minimum="0" Maximum="4"
+                                        TickFrequency="1" IsSnapToTickEnabled="True" ValueChanged="OnAssetZoomChanged" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid x:Name="AssetViewHost">
+                            <TreeView x:Name="DocumentTree" Margin="6,0,4,6" Background="Transparent" BorderThickness="0"
+                                      SelectedItemChanged="OnTreeSelectionChanged"
+                                      PreviewMouseWheel="OnAssetWheel"
+                                      PreviewMouseRightButtonDown="OnTreePreviewMouseRightButtonDown">
                             <TreeView.ContextMenu>
                                 <ContextMenu Opened="OnTreeMenuOpened">
                                     <MenuItem x:Name="TreeMenuReplace" Header="Replace..." Click="OnTreeReplace"
@@ -177,7 +195,17 @@
                                               ToolTip="Replace every texture in this bank from a folder of files exported by this tool (matched by tex&lt;index&gt;_0x&lt;hash&gt;)" />
                                 </ContextMenu>
                             </TreeView.ContextMenu>
-                        </TreeView>
+                            </TreeView>
+
+                            <!-- Grid view: the same assets as tiles with texture previews. Built in
+                                 code from the outline; hidden while the tree (List level) is shown. -->
+                            <ScrollViewer x:Name="AssetGridScroll" Visibility="Collapsed" Background="Transparent"
+                                          Margin="6,0,4,6" VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled" PreviewMouseWheel="OnAssetWheel"
+                                          ScrollChanged="OnAssetGridScroll">
+                                <StackPanel x:Name="AssetGridPanel" Margin="8,0,8,8" />
+                            </ScrollViewer>
+                        </Grid>
                     </DockPanel>
                 </Border>
 

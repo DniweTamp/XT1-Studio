@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using Xt1.Core.Containers;
+using Xt1.Core.Settings;
 using Xt1.Core.Xt1;
 
 namespace Xt1.App.Wpf;
@@ -32,7 +33,11 @@ public partial class MainWindow
         // A one-texture bank still has something to select, so a missing index falls back to the first.
         var texture = section.Bank.Textures.ElementAtOrDefault(textureIndex)
                       ?? section.Bank.Textures.FirstOrDefault();
-        ShowTexture(texture, section);
+
+        // Select through the tree, the way a user does, so the grid's shared-menu target stays in step.
+        _gridSelection = (texture, section);
+        if (texture is not null && FindTextureNode(texture) is { } node) node.IsSelected = true;
+        else ShowTexture(texture, section);
     }
 
     internal string UiTestStatus => StatusLeft.Text ?? string.Empty;
@@ -302,6 +307,24 @@ public partial class MainWindow
     internal FrameworkElement UiTestInspectorElement => InspectorRoot;
 
     internal FrameworkElement UiTestTreeElement => DocumentTree;
+
+    internal FrameworkElement UiTestAssetElement => AssetViewHost;
+
+    /// <summary>Report the Asset Browser zoom state (level, label, grid vs list, tile count).</summary>
+    internal string UiTestAssetViewState()
+    {
+        int tiles = EnumerateTiles(AssetGridPanel).Count();
+        return $"level={_assetLevel} label={AssetZoomLabel.Text} " +
+               $"grid={DocumentTree.Visibility != Visibility.Visible} tiles={tiles} " +
+               $"textures={( _document is null ? 0 : TextureCount(_document))}";
+    }
+
+    /// <summary>Set the Asset Browser zoom level without persisting it, for the headless smoke.</summary>
+    internal string UiTestSetAssetLevel(AssetViewLevel level)
+    {
+        SetAssetLevel(level, persist: false);
+        return UiTestAssetViewState();
+    }
 
     private static string NodeLabel(TreeViewItem item)
     {

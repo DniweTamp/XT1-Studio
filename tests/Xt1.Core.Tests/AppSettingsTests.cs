@@ -27,6 +27,26 @@ public class AppSettingsTests
         Assert.Null(new AppSettings().ImportFormats);
     }
 
+    /// <summary>The Asset Browser starts as the list, and the zoom level survives a save/load.</summary>
+    [Fact]
+    public void AssetBrowserLevel_DefaultsToListAndRoundTrips()
+    {
+        Assert.Equal(AssetViewLevel.List, new AppSettings().AssetBrowserLevel);
+
+        var path = AppSettings.SettingsPath;
+        var backup = File.Exists(path) ? File.ReadAllBytes(path) : null;
+        try
+        {
+            Assert.True(new AppSettings { AssetBrowserLevel = AssetViewLevel.Grid128 }.Save(out var error), error);
+            Assert.Equal(AssetViewLevel.Grid128, AppSettings.Load().AssetBrowserLevel);
+        }
+        finally
+        {
+            if (backup is null) File.Delete(path);
+            else File.WriteAllBytes(path, backup);
+        }
+    }
+
     /// <summary>
     /// The format filter survives a save/load round trip even when it holds an id this build does not
     /// define (a settings file from a newer version). Because the entries are written as numbers rather

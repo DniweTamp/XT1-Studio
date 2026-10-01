@@ -104,6 +104,26 @@ public partial class MainWindow : Window
     private EncoderPicker _encoders = null!;
     private BatchRecompressor _recompressor = null!;
 
+    // Asset Browser zoom: the List tree or a grid of texture thumbnails. Thumbnails are decoded off
+    // the UI thread from the cheapest mip, cached, and cancelled when the grid is rebuilt.
+    private AssetViewLevel _assetLevel = AssetViewLevel.List;
+    private bool _suppressZoom;
+    private (EditableTexture? Texture, BankSection? Section) _gridSelection;
+    private Border? _selectedTile;
+    private CancellationTokenSource? _thumbCts;
+    private readonly SemaphoreSlim _thumbGate = new(3, 3);
+    private readonly List<PendingThumb> _pendingThumbs = new();
+    private readonly Dictionary<ThumbKey, BitmapSource> _thumbCache = new();
+
+    // A thumbnail only depends on the decode inputs (header/layout + payload) and the tile size, so the
+    // key is those stamps rather than the live payload array — otherwise every edit would pin the old
+    // payload and bitmap forever. The cache is capped to bound memory.
+    private const int ThumbCacheLimit = 600;
+    private readonly record struct PendingThumb(Border Tile, Image Image, UIElement Placeholder,
+        EditableTexture Texture, int Size);
+    private readonly record struct ThumbKey(EditableTexture Texture, int PayloadId, int PayloadStamp,
+        int HeaderStamp, int Size);
+
     // Layer-animation playback for a multilayer (3D) texture, shown in the 2D tab.
     private readonly DispatcherTimer _animTimer = new();
     private bool _animPlaying;
@@ -192,6 +212,7 @@ public partial class MainWindow : Window
         RebuildEncoders();
         UpdateThemeIcon();
         UpdateUndoRedo();
+        SetAssetLevel(App.Settings.AssetBrowserLevel, persist: false, rebuild: false);
 
         var args = Environment.GetCommandLineArgs();
         var file = args.Skip(1).FirstOrDefault(File.Exists);
@@ -565,6 +586,7 @@ public partial class MainWindow : Window
     {
         var target = App.Settings;
         target.Theme = source.Theme;
+        target.AssetBrowserLevel = source.AssetBrowserLevel;
         target.DefaultImportFormat = source.DefaultImportFormat;
         target.ImportFormats = source.ImportFormats is null ? null : new List<Xt1Format>(source.ImportFormats);
         target.OpaqueAlphaByDefault = source.OpaqueAlphaByDefault;
@@ -1122,11 +1144,17 @@ public partial class MainWindow : Window
         _rawTexture = document.RawXt1 is { } raw ? EditableTexture.FromRawReadOnly(raw) : null;
         _history.Clear();
         _selected = null;
+        _gridSelection = (null, null);
         _fileRows = null;
         _fileListFolder = null;
 
+        // Thumbnails belong to the previous document's textures; drop them and any pending decodes.
+        _thumbCts?.Cancel();
+        _thumbCache.Clear();
+
         BuildTree();
         RefreshFileList();
+        if (_assetLevel != AssetViewLevel.List) BuildAssetGrid();
 
         StatusRight.Text = $"{document.Kind} \u00B7 {TextureCount(document)} textures";
     }
@@ -1474,7 +1502,15 @@ public partial class MainWindow : Window
     private void OnTreeSelectionChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
     {
         if (e.NewValue is TreeViewItem { Tag: TextureRef reference })
+        {
+            // Keep the grid's target in step, so switching views keeps the same asset selected.
+            _gridSelection = (reference.Texture, reference.Section);
             ShowTexture(reference.Texture, reference.Section);
+        }
+        else if (e.NewValue is TreeViewItem { Tag: BankSection section })
+        {
+            _gridSelection = (null, section);
+        }
     }
 
     /// <summary>The texture/section a tree context-menu action targets.</summary>
@@ -1495,7 +1531,14 @@ public partial class MainWindow : Window
     /// offered item always works.
     /// </summary>
     private BankSection? TargetBank() =>
-        SelectedTreeTarget().Section ?? _document?.Sections.FirstOrDefault();
+        SelectedAssetTarget().Section ?? _document?.Sections.FirstOrDefault();
+
+    /// <summary>
+    /// The asset a menu action targets: the tree selection in List mode, or the clicked tile in grid
+    /// mode. The two views share one context menu, so this is the single source of truth for it.
+    /// </summary>
+    private (EditableTexture? Texture, BankSection? Section) SelectedAssetTarget() =>
+        _assetLevel == AssetViewLevel.List ? SelectedTreeTarget() : _gridSelection;
 
     private void OnTreePreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
@@ -1508,7 +1551,7 @@ public partial class MainWindow : Window
     /// <summary>Enable the tree menu entries for the current selection (also used by the test hooks).</summary>
     private void UpdateTreeMenuState()
     {
-        var (texture, _) = SelectedTreeTarget();
+        var (texture, _) = SelectedAssetTarget();
         var section = TargetBank();
 
         bool hasTexture = texture is not null;
@@ -1530,11 +1573,376 @@ public partial class MainWindow : Window
         TreeMenuBatchReplace.IsEnabled = bankHasTextures;
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Asset Browser zoom: the List tree and a grid of texture thumbnails.
+    // ---------------------------------------------------------------------------------------------
+
+    private static readonly AssetViewLevel[] AssetLevels =
+    {
+        AssetViewLevel.List,
+        AssetViewLevel.Grid64,
+        AssetViewLevel.Grid96,
+        AssetViewLevel.Grid128,
+        AssetViewLevel.Grid192,
+    };
+
+    private static int GridTileSize(AssetViewLevel level) => level switch
+    {
+        AssetViewLevel.Grid64 => 64,
+        AssetViewLevel.Grid96 => 96,
+        AssetViewLevel.Grid128 => 128,
+        AssetViewLevel.Grid192 => 192,
+        _ => 0,
+    };
+
+    private static string LevelLabel(AssetViewLevel level)
+    {
+        int size = GridTileSize(level);
+        return size == 0 ? "List" : $"{size} px";
+    }
+
+    /// <summary>Ctrl+wheel steps the zoom; a plain wheel keeps scrolling the tree/grid.</summary>
+    private void OnAssetWheel(object sender, MouseWheelEventArgs e)
+    {
+        if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
+        int index = Array.IndexOf(AssetLevels, _assetLevel);
+        index = Math.Clamp(index + (e.Delta > 0 ? 1 : -1), 0, AssetLevels.Length - 1);
+        SetAssetLevel(AssetLevels[index]);
+        e.Handled = true;
+    }
+
+    private void OnAssetZoomChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_suppressZoom || !IsLoaded) return;
+        int index = Math.Clamp((int)Math.Round(e.NewValue), 0, AssetLevels.Length - 1);
+        SetAssetLevel(AssetLevels[index]);
+    }
+
+    /// <summary>Switch the Asset Browser between the list tree and a grid of thumbnail tiles.</summary>
+    private void SetAssetLevel(AssetViewLevel level, bool persist = true, bool rebuild = true)
+    {
+        bool fromList = _assetLevel == AssetViewLevel.List;
+        _assetLevel = level;
+
+        _suppressZoom = true;
+        AssetZoomSlider.Value = Array.IndexOf(AssetLevels, level);
+        _suppressZoom = false;
+        AssetZoomLabel.Text = LevelLabel(level);
+
+        bool grid = level != AssetViewLevel.List;
+        if (grid && fromList)
+        {
+            // Carry the tree selection only when entering the grid; a grid->grid zoom must keep the
+            // tile that is already selected (the collapsed tree still holds the old node).
+            _gridSelection = SelectedTreeTarget();
+        }
+        else if (!grid && _gridSelection.Texture is not null && FindTextureNode(_gridSelection.Texture) is { } node)
+        {
+            node.IsSelected = true;
+        }
+
+        DocumentTree.Visibility = grid ? Visibility.Collapsed : Visibility.Visible;
+        AssetGridScroll.Visibility = grid ? Visibility.Visible : Visibility.Collapsed;
+        if (grid && rebuild)
+        {
+            BuildAssetGrid();
+        }
+        else if (!grid)
+        {
+            // Drop the tiles (and any pending thumbnail decodes) while the tree is shown.
+            _thumbCts?.Cancel();
+            _pendingThumbs.Clear();
+            AssetGridPanel.Children.Clear();
+            ClearSelectedTile();
+        }
+        UpdateTreeMenuState();
+
+        if (persist)
+        {
+            App.Settings.AssetBrowserLevel = level;
+            App.Settings.Save();
+        }
+    }
+
+    /// <summary>
+    /// Rebuild the grid from the same outline the tree uses: a bank heading per bank, then a tile per
+    /// texture with its preview and <c>tex&lt;index&gt;_0x&lt;hash&gt;</c> caption.
+    /// </summary>
+    private void BuildAssetGrid()
+    {
+        _thumbCts?.Cancel();
+        _thumbCts?.Dispose();
+        _thumbCts = new CancellationTokenSource();
+
+        AssetGridPanel.Children.Clear();
+        _pendingThumbs.Clear();
+        ClearSelectedTile();
+
+        int size = GridTileSize(_assetLevel);
+        if (_document is null || size == 0) return;
+
+        var outline = BankOutline.Build(_document, _rawTexture);
+        foreach (var bankNode in outline.Children)
+        {
+            if (bankNode.Kind == OutlineKind.SubFile)
+            {
+                var heading = new TextBlock
+                {
+                    Text = BankHeading(bankNode),
+                    Margin = new Thickness(0, AssetGridPanel.Children.Count == 0 ? 2 : 14, 0, 8),
+                };
+                heading.SetResourceReference(FrameworkElement.StyleProperty, "SectionHeader");
+                AssetGridPanel.Children.Add(heading);
+            }
+
+            var wrap = new WrapPanel { Orientation = Orientation.Horizontal };
+            foreach (var child in bankNode.Children)
+            {
+                if (child.Texture is null) continue;
+                wrap.Children.Add(CreateTextureTile(child.Texture, child.Section, size));
+            }
+            AssetGridPanel.Children.Add(wrap);
+        }
+
+        HighlightGridSelection();
+
+        // Decode only what is near the viewport, now and after each scroll.
+        AssetGridScroll.UpdateLayout();
+        ScheduleVisibleThumbs();
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(ScheduleVisibleThumbs));
+    }
+
+    /// <summary>
+    /// Start thumbnail decodes for tiles near the visible area only. Keeps decode work and retained
+    /// bitmaps proportional to the viewport rather than the whole document; pending tiles are decoded
+    /// as they scroll in, and dropped (with their placeholder) when the grid is rebuilt.
+    /// </summary>
+    private void ScheduleVisibleThumbs()
+    {
+        if (_pendingThumbs.Count == 0) return;
+
+        AssetGridScroll.UpdateLayout();
+        double viewport = AssetGridScroll.ViewportHeight;
+        double viewTop = viewport > 0 ? AssetGridScroll.VerticalOffset : double.NegativeInfinity;
+        double viewBottom = viewport > 0 ? viewTop + viewport : double.PositiveInfinity;
+        double margin = Math.Max(200, viewport);
+        var token = _thumbCts?.Token ?? CancellationToken.None;
+
+        for (int i = _pendingThumbs.Count - 1; i >= 0; i--)
+        {
+            var pending = _pendingThumbs[i];
+            double y;
+            try
+            {
+                y = pending.Tile.TransformToAncestor(AssetGridPanel).Transform(new Point(0, 0)).Y;
+            }
+            catch (InvalidOperationException)
+            {
+                continue; // not attached yet; the Loaded-priority pass will retry
+            }
+
+            if (y > viewBottom + margin || y + pending.Tile.ActualHeight < viewTop - margin) continue;
+
+            _pendingThumbs.RemoveAt(i);
+            _ = LoadThumbnailAsync(pending.Image, pending.Placeholder, pending.Texture, pending.Size, token);
+        }
+    }
+
+    private void OnAssetGridScroll(object sender, ScrollChangedEventArgs e) => ScheduleVisibleThumbs();
+
+    /// <summary>A single-bank document names the bank by its file; multi-bank containers use the label.</summary>
+    private string BankHeading(BankOutlineNode bankNode) =>
+        _document is not null && _document.Sections.Count <= 1 ? _document.DisplayName : bankNode.Label;
+
+    private Border CreateTextureTile(EditableTexture texture, BankSection? section, int size)
+    {
+        string captionText = $"tex{texture.Index}_0x{texture.EffectiveHash():X8}";
+
+        var placeholder = new TextBlock
+        {
+            Text = "\uE91B",
+            FontFamily = (FontFamily)FindResource("IconFont"),
+            FontSize = Math.Max(18, size / 3),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        placeholder.SetResourceReference(TextBlock.ForegroundProperty, "Brush.Muted");
+
+        var host = new Grid { Width = size, Height = size };
+        host.Children.Add(placeholder);
+        var image = new Image { Stretch = Stretch.Uniform };
+        host.Children.Add(image);
+
+        var caption = new TextBlock
+        {
+            Text = captionText,
+            TextAlignment = TextAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            FontSize = 11,
+            Margin = new Thickness(4, 3, 4, 4),
+            ToolTip = captionText,
+        };
+        caption.SetResourceReference(TextBlock.ForegroundProperty, "Brush.Text");
+
+        var tile = new Border
+        {
+            Width = size,
+            Margin = new Thickness(0, 0, 8, 8),
+            CornerRadius = new CornerRadius(6),
+            BorderThickness = new Thickness(1),
+            Cursor = Cursors.Hand,
+            Tag = new TextureRef(texture, section),
+            ToolTip = TextureTooltip(texture),
+            Child = new StackPanel { Children = { host, caption } },
+        };
+        tile.SetResourceReference(Border.BackgroundProperty, "Brush.Control");
+        tile.SetResourceReference(Border.BorderBrushProperty, "Brush.Border");
+
+        // The tree's context menu operates through SelectedAssetTarget(), so the tiles reuse the very
+        // same menu instance rather than a duplicate that could drift.
+        tile.ContextMenu = DocumentTree.ContextMenu;
+        tile.PreviewMouseLeftButtonDown += OnTileMouseDown;
+        tile.PreviewMouseRightButtonDown += OnTileMouseDown;
+
+        // Decoding is deferred until the tile nears the viewport (see ScheduleVisibleThumbs), so a
+        // large bank does not decode every thumbnail up front.
+        _pendingThumbs.Add(new PendingThumb(tile, image, placeholder, texture, size));
+        return tile;
+    }
+
+    private void OnTileMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not Border { Tag: TextureRef reference } tile) return;
+        SelectTile(tile);
+        _gridSelection = (reference.Texture, reference.Section);
+        ShowTexture(reference.Texture, reference.Section);
+        UpdateTreeMenuState();
+    }
+
+    private void SelectTile(Border tile)
+    {
+        if (ReferenceEquals(_selectedTile, tile)) return;
+        ClearSelectedTile();
+        _selectedTile = tile;
+        tile.SetResourceReference(Border.BorderBrushProperty, "Brush.Accent");
+        tile.SetResourceReference(Border.BackgroundProperty, "Brush.ControlHover");
+    }
+
+    private void ClearSelectedTile()
+    {
+        if (_selectedTile is null) return;
+        _selectedTile.SetResourceReference(Border.BorderBrushProperty, "Brush.Border");
+        _selectedTile.SetResourceReference(Border.BackgroundProperty, "Brush.Control");
+        _selectedTile = null;
+    }
+
+    /// <summary>Re-highlight the tile matching the current selection after a grid rebuild.</summary>
+    private void HighlightGridSelection()
+    {
+        if (_gridSelection.Texture is null) return;
+        foreach (var tile in EnumerateTiles(AssetGridPanel))
+        {
+            if (tile.Tag is TextureRef reference && ReferenceEquals(reference.Texture, _gridSelection.Texture))
+            {
+                SelectTile(tile);
+                return;
+            }
+        }
+
+        // The selected texture is gone (for example it was deleted): drop it so the shared menu cannot
+        // target a detached texture, while keeping the bank context for actions like "Add texture".
+        _gridSelection = (null, _gridSelection.Section);
+    }
+
+    private static IEnumerable<Border> EnumerateTiles(Panel panel)
+    {
+        foreach (var child in panel.Children)
+        {
+            if (child is Border border) yield return border;
+            else if (child is Panel nested)
+                foreach (var tile in EnumerateTiles(nested)) yield return tile;
+        }
+    }
+
+    /// <summary>Decode the cheapest mip for a tile off the UI thread; the placeholder stays until it lands.</summary>
+    private async Task LoadThumbnailAsync(Image image, UIElement placeholder, EditableTexture texture, int size,
+        CancellationToken token)
+    {
+        var key = ThumbKeyFor(texture, size);
+        if (!_thumbCache.TryGetValue(key, out var bitmap))
+        {
+            try
+            {
+                await _thumbGate.WaitAsync(token);
+                try
+                {
+                    bitmap = await Task.Run(() =>
+                    {
+                        token.ThrowIfCancellationRequested();
+                        var rgba = Thumbnailer.Render(texture, new ThumbnailOptions(size), out _, out _);
+                        return rgba is null ? null : ToBitmapSource(rgba);
+                    }, token);
+                }
+                finally
+                {
+                    _thumbGate.Release();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch
+            {
+                return;
+            }
+
+            if (bitmap is null) return;
+            if (_thumbCache.Count >= ThumbCacheLimit) _thumbCache.Clear();
+            _thumbCache[key] = bitmap;
+        }
+
+        if (token.IsCancellationRequested) return;
+        image.Source = bitmap;
+        placeholder.Visibility = Visibility.Collapsed;
+    }
+
+    private static ThumbKey ThumbKeyFor(EditableTexture texture, int size) =>
+        new(texture, texture.Payload.GetHashCode(), PayloadStamp(texture.Payload),
+            HeaderStamp(texture.Header), size);
+
+    /// <summary>Cheap change stamp for a payload that does not retain the array itself.</summary>
+    private static int PayloadStamp(byte[] payload)
+    {
+        unchecked
+        {
+            int hash = payload.Length;
+            if (payload.Length >= 8)
+            {
+                hash = hash * 31 + BitConverter.ToInt32(payload, 0);
+                hash = hash * 31 + BitConverter.ToInt32(payload, payload.Length - 4);
+            }
+            return hash;
+        }
+    }
+
+    /// <summary>Cheap stamp of the header bytes, which decide the layout the payload is decoded with.</summary>
+    private static int HeaderStamp(Xt1Header header)
+    {
+        var raw = header.Raw;
+        unchecked
+        {
+            int hash = 17;
+            for (int i = 0; i < raw.Length; i++) hash = hash * 31 + raw[i];
+            return hash;
+        }
+    }
+
     private string FileStem => Path.GetFileNameWithoutExtension(_document?.FilePath ?? "texture");
 
     private void OnTreeCopyHash(object sender, RoutedEventArgs e)
     {
-        var (texture, _) = SelectedTreeTarget();
+        var (texture, _) = SelectedAssetTarget();
         if (texture is null) return;
         var text = "0x" + texture.EffectiveHash().ToString("X8", CultureInfo.InvariantCulture);
         try
@@ -1550,7 +1958,7 @@ public partial class MainWindow : Window
 
     private void OnTreeExportPng(object sender, RoutedEventArgs e)
     {
-        var (texture, _) = SelectedTreeTarget();
+        var (texture, _) = SelectedAssetTarget();
         if (texture is null) return;
         if (!TextureCodec.CanDecode(texture.FormatInfo))
         {
@@ -1585,7 +1993,7 @@ public partial class MainWindow : Window
 
     private void OnTreeExportDds(object sender, RoutedEventArgs e)
     {
-        var (texture, _) = SelectedTreeTarget();
+        var (texture, _) = SelectedAssetTarget();
         if (texture is null) return;
         var info = texture.FormatInfo;
         if (info is null || !DdsIo.CanExport(info))
@@ -1614,7 +2022,7 @@ public partial class MainWindow : Window
 
     private void OnTreeExportXt1(object sender, RoutedEventArgs e)
     {
-        var (texture, _) = SelectedTreeTarget();
+        var (texture, _) = SelectedAssetTarget();
         if (texture is null) return;
 
         var dialog = new SaveFileDialog
@@ -1638,7 +2046,7 @@ public partial class MainWindow : Window
 
     private void OnTreeDelete(object sender, RoutedEventArgs e)
     {
-        var (texture, section) = SelectedTreeTarget();
+        var (texture, section) = SelectedAssetTarget();
         if (texture is null || section is null) return;
 
         // Destructive and written on the next save, so confirm first like the WinForms shell did.
@@ -1662,7 +2070,7 @@ public partial class MainWindow : Window
     /// <summary>Replace the selected texture from an image file, or losslessly from a DDS.</summary>
     private void OnTreeReplace(object sender, RoutedEventArgs e)
     {
-        var (texture, _) = SelectedTreeTarget();
+        var (texture, _) = SelectedAssetTarget();
         if (texture is null) return;
 
         var picker = new OpenFileDialog { Filter = ImportFilter, Title = "Choose an image or DDS to import" };
@@ -1747,7 +2155,7 @@ public partial class MainWindow : Window
     /// <summary>Replace the selected texture from a raw .xt1 file (or a bare payload).</summary>
     private void OnTreeReplaceXt1(object sender, RoutedEventArgs e)
     {
-        var (texture, _) = SelectedTreeTarget();
+        var (texture, _) = SelectedAssetTarget();
         if (texture is null) return;
 
         var picker = new OpenFileDialog
@@ -1894,6 +2302,7 @@ public partial class MainWindow : Window
                  && FindFirstTexture(root) is { } first) first.IsSelected = true;
 
         RefreshFileList();
+        if (_assetLevel != AssetViewLevel.List) BuildAssetGrid();
         StatusRight.Text = _document is null ? string.Empty : $"{_document.Kind} \u00B7 {TextureCount(_document)} textures";
     }
 

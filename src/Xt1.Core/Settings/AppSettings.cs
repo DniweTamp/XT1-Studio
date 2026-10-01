@@ -18,6 +18,19 @@ public enum AppTheme
     Dark,
 }
 
+/// <summary>
+/// Zoom level of the Asset Browser. <see cref="List"/> is the flat tree as it has always been; the
+/// grid levels render texture tiles at the named tile size (in pixels).
+/// </summary>
+public enum AssetViewLevel
+{
+    List,
+    Grid64,
+    Grid96,
+    Grid128,
+    Grid192,
+}
+
 /// <summary>Application settings, persisted to <c>settings.json</c> next to the executable.</summary>
 public sealed class AppSettings
 {
@@ -26,6 +39,10 @@ public sealed class AppSettings
     /// so a running session is always concrete Light or Dark.</summary>
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public AppTheme Theme { get; set; } = AppTheme.System;
+
+    /// <summary>Asset Browser zoom: the tree list (default) or a grid of texture thumbnails.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public AssetViewLevel AssetBrowserLevel { get; set; } = AssetViewLevel.List;
 
     /// <summary>NVTT is the default encoder; the managed encoder is the fallback when NVTT is absent.</summary>
     [JsonConverter(typeof(JsonStringEnumConverter))]

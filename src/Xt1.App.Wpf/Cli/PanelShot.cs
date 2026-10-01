@@ -4,6 +4,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Xt1.App.Wpf.Preview;
 using Xt1.Core.Containers;
+using Xt1.Core.Settings;
 using Xt1.Core.Util;
 
 namespace Xt1.App.Wpf.Cli;
@@ -23,14 +24,18 @@ internal static class PanelShot
     {
         if (file is null || output is null || !File.Exists(file))
         {
-            log("usage: --panelshot <file> <out.png> [--index N] [--advanced] [--tree] [--height N]");
+            log("usage: --panelshot <file> <out.png> [--index N] [--advanced] [--tree] [--asset] " +
+                "[--level N] [--height N]");
             return 2;
         }
 
         int? index = CliOptions.GetInt(args, "--index");
         int? height = CliOptions.GetInt(args, "--height");
+        int? level = CliOptions.GetInt(args, "--level");
         bool advanced = args.Contains("--advanced");
         bool tree = args.Contains("--tree");
+        bool asset = args.Contains("--asset");
+        bool windowShot = args.Contains("--window");
 
         return HeadlessCli.RunOnUiThread(log, () =>
         {
@@ -49,9 +54,15 @@ internal static class PanelShot
                 if (height is not null) window.Height = height.Value;
                 if (index is not null) window.UiTestSelectTexture(0, index.Value);
                 window.UiTestSelectRightTab(advanced ? 1 : 0);
+                if (level is not null)
+                    window.UiTestSetAssetLevel((AssetViewLevel)Math.Clamp(level.Value, 0, 4));
 
                 window.UpdateLayout();
                 window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Loaded);
+
+                // Thumbnails resolve on the dispatcher after their background decode; pump it briefly
+                // so the shot shows previews rather than placeholders.
+                if (asset || level is not null) Pump(window, 1200);
 
                 log($"file: {Path.GetFileName(file)}");
                 log($"inspector: {window.UiTestInspectorState}");
@@ -59,6 +70,7 @@ internal static class PanelShot
                 log($"status: {window.UiTestStatus}");
                 log("tree menu (text|state):");
                 foreach (var item in window.UiTestTreeMenuItems()) log("  " + item);
+                if (asset || level is not null) log($"asset view: {window.UiTestAssetViewState()}");
 
                 var inspector = Capture(window.UiTestInspectorElement);
                 if (inspector is null)
@@ -68,7 +80,20 @@ internal static class PanelShot
                 }
 
                 BitmapSource result = inspector;
-                if (tree && Capture(window.UiTestTreeElement) is { } treeShot)
+                if (windowShot && Capture(window) is { } windowCapture)
+                {
+                    result = windowCapture;
+                }
+                else if (asset)
+                {
+                    if (Capture(window.UiTestAssetElement) is not { } assetShot)
+                    {
+                        log("[error] could not render the asset browser");
+                        return 1;
+                    }
+                    result = assetShot;
+                }
+                else if (tree && Capture(window.UiTestTreeElement) is { } treeShot)
                 {
                     var composed = new DrawingVisual();
                     using (var context = composed.RenderOpen())
@@ -103,6 +128,19 @@ internal static class PanelShot
                 window.Close();
             }
         });
+    }
+
+    /// <summary>Run the dispatcher for a bounded time so queued async work (thumbnails) completes.</summary>
+    private static void Pump(Window window, int milliseconds)
+    {
+        var frame = new System.Windows.Threading.DispatcherFrame();
+        var timer = new System.Windows.Threading.DispatcherTimer(
+            TimeSpan.FromMilliseconds(milliseconds),
+            System.Windows.Threading.DispatcherPriority.Background,
+            (_, _) => frame.Continue = false, window.Dispatcher);
+        timer.Start();
+        System.Windows.Threading.Dispatcher.PushFrame(frame);
+        timer.Stop();
     }
 
     /// <summary>Render one element at its laid-out size, or null when it has no size yet.</summary>

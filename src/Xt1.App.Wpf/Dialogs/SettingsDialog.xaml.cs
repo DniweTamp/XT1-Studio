@@ -268,6 +268,7 @@ public partial class SettingsDialog : ThemedDialog
     private static AppSettings CopyOf(AppSettings s) => new()
     {
         Theme = s.Theme,
+        AssetBrowserLevel = s.AssetBrowserLevel,
         DefaultImportFormat = s.DefaultImportFormat,
         ImportFormats = s.ImportFormats is null ? null : new List<Xt1Format>(s.ImportFormats),
         OpaqueAlphaByDefault = s.OpaqueAlphaByDefault,

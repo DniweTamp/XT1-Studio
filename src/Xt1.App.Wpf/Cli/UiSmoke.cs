@@ -209,6 +209,24 @@ internal static class UiSmoke
                         log("  [--] file pick: n/a (no sibling file)");
                     }
 
+                    // Asset Browser zoom: the slider swaps the tree for a grid of texture tiles and back.
+                    Step("--- asset browser zoom ---");
+                    window.UiTestSelectTexture(0, 0);
+                    var gridState = window.UiTestSetAssetLevel(AssetViewLevel.Grid128);
+                    log($"       asset grid: {gridState}");
+                    Expect("the asset grid shows texture tiles",
+                        gridState.Contains("grid=True") && !gridState.Contains("tiles=0"), gridState);
+                    // The tiles share the tree's context menu, so the grid selection must drive it.
+                    var gridMenu = window.UiTestTreeMenuItems();
+                    log($"       grid menu: {string.Join(", ", gridMenu)}");
+                    Expect("the grid selection drives the shared context menu",
+                        gridMenu.Contains("Copy hash|enabled"), string.Join(", ", gridMenu));
+                    var listState = window.UiTestSetAssetLevel(AssetViewLevel.List);
+                    log($"       asset list: {listState}");
+                    Expect("the asset list is the tree again",
+                        listState.Contains("grid=False") && listState.Contains("tiles=0"), listState);
+                    Step("asset browser zoom done");
+
                     // A brand-new empty bank must still offer "Add texture".
                     Step("--- empty bank ---");
                     window.UiTestCreateEmptyBank(standalone: false);
