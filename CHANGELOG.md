@@ -1,5 +1,29 @@
 # Change log
 
+## Unreleased — trim trailing padding from saved `.wtp` streams
+
+A saved split bank (`.wta`/`.wtp`) wrote its payload stream back exactly as loaded, padding and all.
+A stream copied out of a container can carry the container's whole trailing pad — one reported case
+was an `es0610.wtp` of 11,583,488 bytes where only 5,423,104 are referenced by `table0`/`table1`, so
+the file came out ~2x too big even though its offset table was correct (every gap already matched
+`align4096(size)`, byte-for-byte identical to a repack by other tools).
+
+* **Payload streams** (`Editing/BankWriter.cs`): when an untouched bank's stored stream is written
+  back to a loose `.wtp`, it is now cut to `max(offset + length)` — the end of the last payload,
+  past which no table entry points. Referenced payload bytes are never touched, an already-exact
+  stream is unchanged, and a dirty bank still rebuilds exactly as before.
+* **Opt-out**: `WriteOptions.TrimTrailingPadding = false` (CLI `--no-trim-padding`) keeps the loaded
+  stream byte-for-byte.
+* **DAT documents are unaffected**: the container keeps its stored layout (file length, descriptors
+  and inter-member padding) by design, and trimming inside it would not shrink the `.dat`/`.dtt` —
+  only alter their bytes.
+
+### Tests
+
+* `tests/Xt1.Core.Tests/PayloadPaddingTests.cs`: padded stream is trimmed to the referenced end and
+  stays byte-identical there; the opt-out keeps it; an unpadded stream round-trips byte-for-byte; an
+  empty bank's stream is never trimmed. Full suite: 549 passing.
+
 ## Unreleased — Bayonetta 1 / Bayonetta 2 support
 
 Additions made to `Xt1.Core` for the Bayonetta mod manager. Bayonetta 3 behaviour is

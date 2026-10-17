@@ -552,6 +552,7 @@ internal static class FileCli
             OutputDirectory = CliOptions.Get(options, "--out"),
             OutputBaseName = CliOptions.Get(options, "--base"),
             RecomputePayloadOffsets = !Has(options, "--no-recompute"),
+            TrimTrailingPadding = !Has(options, "--no-trim-padding"),
             WritePayloadSide = !Has(options, "--no-payload-side"),
         };
 
@@ -789,7 +790,7 @@ internal static class FileCli
         log("recompress: --rule bc1|bc1-bc3|bc1-bc7|bc7  --quality Q  --alpha-quality Q");
         log("            --opaque-format NAME  --alpha-format NAME  (bc7, astc 8x8; colour space follows source)");
         log("            --downscale  --downscale-without-mips  --no-sync-flags");
-        log("writing:   --out DIR  --base NAME  --no-recompute  --no-payload-side  --dry-run");
+        log("writing:   --out DIR  --base NAME  --no-recompute  --no-trim-padding  --no-payload-side  --dry-run");
     }
 
     /// <summary>An <see cref="IProgress{T}"/> that logs inline, so headless runs need no message pump.</summary>

@@ -9,16 +9,24 @@ namespace Xt1.Core.Editing;
 /// </summary>
 public static class BankWriter
 {
-    /// <summary>Build the payload stream by placing each texture's bytes at its table0 offset.</summary>
-    public static byte[] BuildPayloadStream(BankSection section, bool recomputeOffsets)
+    /// <summary>
+    /// Build the payload stream by placing each texture's bytes at its table0 offset.
+    /// <paramref name="trimTrailingPadding"/> drops unreferenced bytes after the last payload when an
+    /// untouched bank's stored stream is written back, so a padded input <c>.wtp</c> does not carry
+    /// its bloat into the output.
+    /// </summary>
+    public static byte[] BuildPayloadStream(BankSection section, bool recomputeOffsets,
+        bool trimTrailingPadding = true)
     {
         var bank = section.Bank;
 
-        // An untouched bank keeps its exact stored stream. Trailing padding is not uniform:
-        // core.dtt's "wtp" ends precisely at the last payload (34528256, not 4096-aligned) while
-        // other containers pad, so repacking a clean stream would change bytes for no reason.
+        // An untouched bank keeps its exact stored stream: trailing padding is not uniform, so
+        // repacking a clean stream would change bytes for no reason. Bytes past the last payload are
+        // unreferenced by table0/table1 though, and a stream copied out of a container can carry the
+        // container's whole trailing pad (a `.wtp` extracted from a `.dtt`, say), so drop them unless
+        // the caller asked to keep the stored bytes.
         if (!bank.IsDirty && !bank.StructureDirty && section.PayloadStream.Length > 0)
-            return section.PayloadStream;
+            return trimTrailingPadding ? TrimTrailingPadding(section) : section.PayloadStream;
 
         if (recomputeOffsets)
         {
@@ -42,6 +50,32 @@ public static class BankWriter
             tex.Payload.CopyTo(stream, at);
         }
         return stream;
+    }
+
+    /// <summary>
+    /// Cut a stored payload stream back to the end of its last referenced payload. Every
+    /// <c>table0</c>/<c>table1</c> pair describes one payload, so anything past
+    /// <c>max(offset + length)</c> is unreferenced padding and can be dropped. Streams that are
+    /// already exact, or whose layout cannot be trusted (no textures, an offset before the stream
+    /// base), are returned untouched.
+    /// </summary>
+    private static byte[] TrimTrailingPadding(BankSection section)
+    {
+        var bank = section.Bank;
+        long baseOffset = bank.IsStandalone ? bank.PayloadBase : 0;
+
+        long end = 0;
+        foreach (var tex in bank.Textures)
+        {
+            long relative = (long)tex.PayloadOffset - baseOffset;
+            if (relative < 0) return section.PayloadStream; // unexpected layout: keep the stored bytes
+            end = Math.Max(end, relative + tex.Payload.Length);
+        }
+
+        // No textures anchor the end, and there is nothing to cut once the stream already ends at
+        // the last payload.
+        if (end <= 0 || end >= section.PayloadStream.Length) return section.PayloadStream;
+        return section.PayloadStream.AsSpan(0, (int)end).ToArray();
     }
 
     public static WriteResult Write(BankDocument document, WriteOptions options)
@@ -82,7 +116,8 @@ public static class BankWriter
         var section = document.Sections[0];
         // Recompute payload offsets FIRST: it mutates table0/table1, and the WTB must be
         // serialized from the same state the payload stream is laid out with.
-        var payload = BuildPayloadStream(section, options.RecomputePayloadOffsets);
+        var payload = BuildPayloadStream(section, options.RecomputePayloadOffsets,
+            options.TrimTrailingPadding);
         var bankBytes = section.Bank.ToBytes();
 
         var headerPath = ResolveHeaderPath(document, options);
@@ -111,10 +146,13 @@ public static class BankWriter
             }
 
             // Build the payload stream (which recomputes table0/table1) before serializing the
-            // WTB, otherwise the "wta" sub-file would carry stale offsets.
+            // WTB, otherwise the "wta" sub-file would carry stale offsets. The container keeps its
+            // stored layout (length, descriptors and inter-member padding), so trailing padding is
+            // not trimmed here: it would not shrink the .dtt and would only alter its bytes.
             if (section.WtpSubFile is not null)
             {
-                var payload = BuildPayloadStream(section, options.RecomputePayloadOffsets);
+                var payload = BuildPayloadStream(section, options.RecomputePayloadOffsets,
+                    trimTrailingPadding: false);
                 section.WtpSubFile.Bytes = payload;
             }
 

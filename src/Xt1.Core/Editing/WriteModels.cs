@@ -8,6 +8,16 @@ public sealed class WriteOptions
     /// <summary>Recompute <c>table0</c> payload offsets as align4096 cumulative sizes before writing.</summary>
     public bool RecomputePayloadOffsets { get; set; } = true;
 
+    /// <summary>
+    /// Drop unreferenced bytes after the last payload when an untouched split bank's stored stream is
+    /// written back to a loose <c>.wtp</c>. A payload stream copied out of a container (or produced by
+    /// another tool) can carry a large trailing pad that no <c>table0</c>/<c>table1</c> entry
+    /// references; keeping it only bloats the file. Defaults on; disable to keep the loaded stream
+    /// byte-for-byte. Model (DAT) documents ignore this: their container layout, padding included, is
+    /// preserved by design.
+    /// </summary>
+    public bool TrimTrailingPadding { get; set; } = true;
+
     /// <summary>Write the payload side even when it is unchanged.</summary>
     public bool WritePayloadSide { get; set; } = true;
 
