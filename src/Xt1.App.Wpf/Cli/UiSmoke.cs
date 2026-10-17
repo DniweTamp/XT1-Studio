@@ -252,7 +252,7 @@ internal static class UiSmoke
                     var emptyMenu = window.UiTestTreeMenuItems();
                     log($"       menu: {string.Join(", ", emptyMenu)}");
                     Expect("an empty bank can still be filled",
-                        emptyMenu.Contains("Add texture from image...|enabled"), string.Join(", ", emptyMenu));
+                        emptyMenu.Contains("Add texture from image, DDS or .xt1...|enabled"), string.Join(", ", emptyMenu));
 
                     // ...and the action it offers must resolve a bank: the menu's fallback and the
                     // handler's lookup have to agree, or the item is enabled but does nothing.

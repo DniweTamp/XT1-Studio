@@ -270,6 +270,42 @@ public static class TextureOperations
         return texture;
     }
 
+    /// <summary>
+    /// Build a brand-new editable texture from a raw `.xt1` blob: header and payload are copied
+    /// verbatim (no decode or re-encode), so any type the blob describes — 2D, cube or 3D — is
+    /// added exactly as "Export .xt1..." wrote it. The loose form carries no table2/table3, so the
+    /// caller applies the add-time conventions (name, CRC32 hash, model-bank class, flag sync)
+    /// exactly as it does for image and DDS adds.
+    /// </summary>
+    public static EditableTexture? BuildFromXt1(byte[] bytes, string? name, out string? error)
+    {
+        error = null;
+        if (!RawXt1.HasMagic(bytes))
+        {
+            error = "not a raw XT1 blob (missing \"XT1\\0\" magic)";
+            return null;
+        }
+
+        var raw = RawXt1.Parse(bytes);
+        if (raw.Payload.Length == 0)
+        {
+            error = "the .xt1 carries no payload (header-only file)";
+            return null;
+        }
+
+        if ((ulong)raw.Payload.Length < raw.Header.ImageSize)
+        {
+            error = $"the .xt1 payload is {raw.Payload.Length} bytes but its imageSize is " +
+                    $"{raw.Header.ImageSize} (the file looks truncated)";
+            return null;
+        }
+
+        // Shares the freshly parsed header/payload with the wrapper; the RawXt1 is discarded here.
+        var texture = EditableTexture.FromRaw(raw);
+        texture.Name = name;
+        return texture;
+    }
+
     /// <summary>Replace a cubemap from six faces. See <see cref="Replace2D"/> for <paramref name="originalHeader"/>.</summary>
     public static OperationResult ReplaceCube(EditableTexture texture, IReadOnlyList<RgbaImage> faces,
         ITextureEncoder encoder, bool generateMips, EncodeQuality quality, byte[]? originalHeader = null)

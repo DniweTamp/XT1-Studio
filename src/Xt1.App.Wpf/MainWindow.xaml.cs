@@ -436,7 +436,7 @@ public partial class MainWindow : Window
             App.Settings.LastDirectory = Path.GetDirectoryName(save.FileName);
             RecordRecent(save.FileName); // also persists LastDirectory with the updated history
             StatusLeft.Text = $"New empty {(dialog.Standalone ? "standalone WTB" : "split WTA")} bank - " +
-                              "right-click the bank in the tree and choose \"Add texture from image...\", then Save.";
+                              "right-click the bank in the tree and choose \"Add texture from image, DDS or .xt1...\", then Save.";
         }
         catch (Exception ex)
         {
@@ -2141,8 +2141,16 @@ public partial class MainWindow : Window
 
     // --- importing -----------------------------------------------------------------------------
 
+    /// <summary>Image extensions the import/add handlers accept, as one filter fragment.</summary>
+    private const string ImageExtensions = "*.png;*.bmp;*.jpg;*.jpeg;*.tga;*.dds";
+
     private const string ImportFilter =
-        "Images (*.png;*.bmp;*.jpg;*.jpeg;*.tga;*.dds)|*.png;*.bmp;*.jpg;*.jpeg;*.tga;*.dds|All files (*.*)|*.*";
+        $"Images ({ImageExtensions})|{ImageExtensions}|All files (*.*)|*.*";
+
+    /// <summary>The add dialog also takes a loose `.xt1`, copied in verbatim (see BuildFromXt1).</summary>
+    private const string AddFilter =
+        $"Images or textures ({ImageExtensions};*.xt1)|{ImageExtensions};*.xt1|" +
+        "Loose texture (*.xt1)|*.xt1|All files (*.*)|*.*";
 
     /// <summary>Replace the selected texture from an image file, or losslessly from a DDS.</summary>
     private void OnTreeReplace(object sender, RoutedEventArgs e)
@@ -2338,14 +2346,24 @@ public partial class MainWindow : Window
             return;
         }
 
-        var picker = new OpenFileDialog { Filter = ImportFilter, Title = "Choose an image or DDS to add" };
+        var picker = new OpenFileDialog { Filter = AddFilter, Title = "Choose an image, DDS or .xt1 to add" };
         if (picker.ShowDialog(this) != true) return;
 
         var name = Path.GetFileNameWithoutExtension(picker.FileName);
         try
         {
             EditableTexture? texture;
-            if (picker.FileName.EndsWith(".dds", StringComparison.OrdinalIgnoreCase))
+            if (picker.FileName.EndsWith(".xt1", StringComparison.OrdinalIgnoreCase))
+            {
+                // A loose .xt1 is header + payload: add it verbatim, no decode or re-encode.
+                texture = TextureOperations.BuildFromXt1(File.ReadAllBytes(picker.FileName), name, out var xt1Error);
+                if (texture is null)
+                {
+                    StatusLeft.Text = "Add failed: " + (xt1Error ?? "could not import the .xt1");
+                    return;
+                }
+            }
+            else if (picker.FileName.EndsWith(".dds", StringComparison.OrdinalIgnoreCase))
             {
                 var dds = DdsIo.Read(File.ReadAllBytes(picker.FileName));
                 texture = TextureOperations.BuildFromDds(dds, name, out var ddsError);

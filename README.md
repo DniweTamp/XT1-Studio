@@ -355,8 +355,8 @@ tests/Xt1.Core.Tests      468 tests, real-file validation against D:\Bayonetta3\
 a 3D volume carries every depth slice of each level and writes `resourceDimension = TEXTURE3D`), and a bank- or
   container-wide PNG/DDS/XT1 export. All of it is in the tree's right-click menu.
 - **File → New empty bank...** authors a fresh `.wta`+`.wtp` (split bank, the layout most of the game
-  uses) or standalone `.wtb` with no textures. An empty bank still enables *Add texture from image...*
-  in the tree menu so it can be filled.
+  uses) or standalone `.wtb` with no textures. An empty bank still enables *Add texture from image, DDS or .xt1...*
+  in the tree menu so it can be filled (a loose `.xt1` is added verbatim — header and payload, no re-encode).
 - **Tools → Export textures from folder...**: writes every texture in a folder of
   `.dat`/`.wta`/`.wtb`/`.xt1` banks to PNG, DDS or raw XT1, with an optional recursive scan. The output
   is either one folder for everything (same-named banks get a numeric suffix) or one subfolder per bank

@@ -1,5 +1,28 @@
 # Change log
 
+## Unreleased — add textures to a bank from a loose `.xt1`
+
+"Add texture" only accepted common images (re-encoded) and DDS (lossless), while the loose-`.xt1`
+form the tool itself writes — "Export .xt1...", the Explorer thumbnails — could only be used to
+*replace* an existing texture. A texture you can export you can also add back.
+
+* **Core** (`Editing/TextureOperations.cs`): new `BuildFromXt1` parses a raw `.xt1` blob and wraps
+  it as a new editable texture — header and payload copied verbatim, no decode or re-encode, any
+  texture type the blob describes (2D, cube, 3D). A blob without the `XT1\0` magic, a header-only
+  file, or a payload shorter than the header's `imageSize` is rejected with a reason.
+* **Shell**: the bank context menu's add item is now "Add texture from image, DDS or .xt1..." and
+  its picker takes `.xt1` files; the loose form carries no table2/table3, so the same add-time
+  conventions as image/DDS adds apply (name from the file name, CRC32 hash, model-bank class bit,
+  sRGB/cube bits synced from the format when the setting is on).
+* **CLI**: `--file add` takes `file.xt1` as the input the same way (`--name` still applies);
+  format/encoder options are ignored for it, as they already are for DDS.
+
+### Tests
+
+* `tests/Xt1.Core.Tests/AddFromXt1Tests.cs`: header/payload verbatim (2D and cube, cube flag sync),
+  the three rejection cases, the add/undo command, and a full save/reload of a split bank with the
+  add-time conventions applied.
+
 ## Unreleased — trim trailing padding from saved `.wtp` streams
 
 A saved split bank (`.wta`/`.wtp`) wrote its payload stream back exactly as loaded, padding and all.

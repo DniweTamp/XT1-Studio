@@ -173,8 +173,8 @@
                                         <MenuItem x:Name="TreeMenuExportXt1" Header="Export .xt1..." Click="OnTreeExportXt1" />
                                     </MenuItem>
                                     <Separator Style="{StaticResource MenuSeparator}" />
-                                    <MenuItem x:Name="TreeMenuAddTexture" Header="Add texture from image..." Click="OnTreeAddTexture"
-                                              ToolTip="Add a new texture to this bank from an image or a DDS" />
+                                    <MenuItem x:Name="TreeMenuAddTexture" Header="Add texture from image, DDS or .xt1..." Click="OnTreeAddTexture"
+                                              ToolTip="Add a new texture to this bank from an image (re-encoded), a DDS (lossless) or a raw .xt1 (header and payload copied verbatim)" />
                                     <MenuItem x:Name="TreeMenuDelete" Header="Delete texture" Click="OnTreeDelete" />
                                     <Separator Style="{StaticResource MenuSeparator}" />
                                     <MenuItem x:Name="TreeMenuCopyHash" Header="Copy hash" Click="OnTreeCopyHash" />

@@ -269,7 +269,17 @@ internal static class FileCli
         EditableTexture? texture;
         try
         {
-            if (input.EndsWith(".dds", StringComparison.OrdinalIgnoreCase))
+            if (input.EndsWith(".xt1", StringComparison.OrdinalIgnoreCase))
+            {
+                // A loose .xt1 is header + payload: add it verbatim, no decode or re-encode.
+                texture = TextureOperations.BuildFromXt1(File.ReadAllBytes(input), null, out var xt1Error);
+                if (texture is null)
+                {
+                    log($"[error] {xt1Error ?? "could not import the .xt1"}");
+                    return 1;
+                }
+            }
+            else if (input.EndsWith(".dds", StringComparison.OrdinalIgnoreCase))
             {
                 var dds = DdsIo.Read(File.ReadAllBytes(input));
                 texture = TextureOperations.BuildFromDds(dds, null, out var ddsError);
@@ -776,7 +786,7 @@ internal static class FileCli
         log("  save <path>                                  rewrite a bank (round-trip)");
         log("  export <path> <out> [--as png|dds|xt1]       export texture(s); no selector = all");
         log("  import <path> <image|file.dds>               replace one texture from an image or DDS");
-        log("  add <path> <image|file.dds> [--bank N]       add a texture to a bank");
+        log("  add <path> <image|file.dds|file.xt1> [--bank N]  add a texture to a bank");
         log("  delete <path>                                delete one texture");
         log("  replace-raw <path> <file|payload> [--force]  replace from an .xt1 or raw payload");
         log("  dummy <path> [--fill white|black|normal]     replace with a solid 8x8 ASTC 8x8 (2D only)");
