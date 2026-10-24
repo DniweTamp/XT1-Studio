@@ -104,4 +104,5 @@ Also available in **Settings → Explorer**.
 ## Known limitations
 
 - BC6H encoding requires NVTT.
-## Disclaimer: This program includes ai-generated code.
+## Disclaimer
+This program includes ai-generated code.
