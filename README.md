@@ -97,7 +97,6 @@ Managed assemblies are bundled into `XT1 Studio.exe`. In the default mode `glfw3
 ```
 
 Also available in **Settings → Explorer**.
-
 - Loose `.xt1` files only. Banks keep their icon.
 - Requires the .NET 8 runtime; if it is missing there are no thumbnails and no error.
 - Explorer caches thumbnails per file. Restart Explorer or clear the cache to refresh.
@@ -105,3 +104,4 @@ Also available in **Settings → Explorer**.
 ## Known limitations
 
 - BC6H encoding requires NVTT.
+## Disclaimer: This program includes ai-generated code.
