@@ -159,6 +159,26 @@ public static class TextureEncoder
         return EncodeResult.Ok(cubePayload);
     }
 
+    private static uint AdjustLayoutForEdit(Xt1Header header, int width, int height, int depth,
+        TextureType type)
+    {
+        if (type.Is3D() || type == TextureType.T1D)
+            return header.Layout;
+
+        var info = header.Info;
+        // Clear the ASTC wide-pitch bit (0x400) whenever a texture is re-encoded or resized.
+        uint flags = header.Layout & ~0x407u;
+        bool sameDimensions = header.Width == (uint)width
+            && header.Height == (uint)height
+            && header.Depth == (uint)depth;
+
+        uint blkLog2 = sameDimensions || info is null
+            ? (header.Layout & 0x7u)
+            : (uint)GobSwizzle.BlockHeightLog2(info.HeightBlocks(height));
+
+        return flags | blkLog2;
+    }
+
     private static LayoutResult? ComputeLayout(Xt1Header header, int width, int height, int depth,
         int mipCount, TextureType type)
     {
@@ -168,6 +188,7 @@ public static class TextureEncoder
         temp.Depth = (uint)depth;
         temp.MipCount = mipCount;
         temp.Type = type;
+        temp.Layout = AdjustLayoutForEdit(header, width, height, depth, type);
         var layout = SurfaceLayout.Compute(temp);
         return layout.Applicable ? layout : null;
     }
@@ -228,10 +249,12 @@ public static class TextureEncoder
         int mipCount, TextureType type)
     {
         var header = texture.Header;
+        uint adjustedLayout = AdjustLayoutForEdit(header, width, height, depth, type);
         header.Width = (uint)width;
         header.Height = (uint)height;
         header.Depth = (uint)depth;
         header.MipCount = mipCount;
+        header.Layout = adjustedLayout;
         header.ImageSize = (ulong)payload.Length;
         header.Type = type;
         header.HeaderSize = Xt1Header.Size;

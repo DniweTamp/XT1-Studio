@@ -655,4 +655,62 @@ public class EditingTests
         Assert.False(TextureOperations.DummyOut(volume, TextureOperations.DummyFill.Black, encoder,
             EncodeQuality.Fastest).Success);
     }
+
+    [Fact]
+    public void DummyOut_UpdatesLayoutBlockHeightLog2AndClearsWidePitch()
+    {
+        var texture = EditableTexture.CreateNew(Xt1Format.Astc8x8Unorm, 1024, 1024, layout: 0x404u);
+        var encoder = DummyEncoder(Xt1Format.Astc8x8Unorm);
+
+        var result = TextureOperations.DummyOut(texture, TextureOperations.DummyFill.White, encoder,
+            EncodeQuality.Fastest);
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(0u, texture.Header.Layout & 0x407u);
+        Assert.NotNull(result.Command);
+
+        result.Command!.Undo();
+        Assert.Equal(0x404u, texture.Header.Layout);
+    }
+
+    [Fact]
+    public void StandaloneWtbWriter_PreservesSyncTable1WithImageSize()
+    {
+        var bank = WtbBank.CreateEmpty(includeTable3: true, standalone: true, payloadBase: 0x1000);
+        var texture = EditableTexture.CreateNew(Xt1Format.Bc1Unorm, 16, 16);
+        texture.Payload = new byte[128];
+        texture.PayloadSize = 64;
+        texture.Header.ImageSize = 128;
+        bank.Add(texture);
+        bank.SyncTable1WithImageSize = true;
+
+        var bytes = StandaloneWtbWriter.Build(bank, new WriteOptions());
+        Assert.True(bank.SyncTable1WithImageSize);
+
+        var reparsed = WtbBank.Parse(bytes);
+        Assert.Equal(128u, reparsed.Textures[0].PayloadSize);
+    }
+
+    [Fact]
+    public void DdsIo_And_TgaIo_RejectTruncatedHeadersWithInvalidDataException()
+    {
+        var shortDds = new byte[] { (byte)'D', (byte)'D', (byte)'S', (byte)' ', 0, 1, 2, 3 };
+        Assert.Throws<InvalidDataException>(() => DdsIo.Read(shortDds));
+
+        var badTga = new byte[20];
+        badTga[0] = 255; // idLength exceeds file length
+        badTga[2] = 2;   // uncompressed truecolor
+        badTga[12] = 4;  // width = 4
+        badTga[14] = 4;  // height = 4
+        badTga[16] = 32; // 32 bpp
+        Assert.Throws<InvalidDataException>(() => TgaIo.Read(badTga));
+    }
+
+    [Fact]
+    public void NvttFormatMap_PromotesBc1ToBc1aForAlpha()
+    {
+        Assert.True(NvttFormatMap.TryGetCliFormatId(Xt1Format.Bc1Unorm, hasAlpha: false, out int opaqueId));
+        Assert.True(NvttFormatMap.TryGetCliFormatId(Xt1Format.Bc1Unorm, hasAlpha: true, out int alphaId));
+        Assert.NotEqual(opaqueId, alphaId);
+    }
 }

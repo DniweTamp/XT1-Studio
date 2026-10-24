@@ -160,6 +160,7 @@ public sealed class BatchRecompressor
         int originalMips = texture.Header.MipCount;
         uint originalW = texture.Header.Width;
         uint originalH = texture.Header.Height;
+        uint originalLayout = texture.Header.Layout;
         texture.Header.Format = target.Format;
 
         var quality = options.QualityFor(hasAlpha);
@@ -173,6 +174,7 @@ public sealed class BatchRecompressor
             texture.Header.MipCount = originalMips;
             texture.Header.Width = originalW;
             texture.Header.Height = originalH;
+            texture.Header.Layout = originalLayout;
             log.Report($"    texture {texture.Index}: {result.Error}");
             return false;
         }

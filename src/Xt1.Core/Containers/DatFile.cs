@@ -127,6 +127,7 @@ public sealed class DatFile
     private readonly byte[] _originalFileBytes;
     private readonly string[] _originalNames;
     private bool _structureDirty;
+    private bool _hasExtraPointer;
 
     /// <summary>Byte order of this container. Bayonetta 1 (PC) / Bayonetta 2 (Switch) / Bayonetta 3
     /// are little-endian; Bayonetta 2 (Wii U) is big-endian.</summary>
@@ -359,6 +360,7 @@ public sealed class DatFile
             NameSlotSize = slot,
             HeaderWord1C = word1C,
             ByteOrder = bo,
+            _hasExtraPointer = pExtra != 0,
         };
 
         if (pExtra > 0 && DatHashMap.TryParse(fileBytes, pExtra, n, bo, extraLength, out var hashMap))
@@ -396,11 +398,12 @@ public sealed class DatFile
         uint pDesc = Mem.ReadU32(b, 0x14, order);
         uint pExtra = Mem.ReadU32(b, 0x18, order);
 
-        int len = b.Length;
-        if (pOffsets < 0x20 || pOffsets + 4 >= len) return false;
-        if (pTags < 0x20 || pTags + 4 * (int)count > len) return false;
-        if (pNames < 0x20 || pNames + 4 > len) return false;
-        if (pDesc < 0x20 || pDesc + 4 * (int)count > len) return false;
+        long len = b.Length;
+        long tableBytes = 4L * count;
+        if (pOffsets < 0x20 || pOffsets + Math.Max(4L, tableBytes) > len) return false;
+        if (pTags < 0x20 || pTags + tableBytes > len) return false;
+        if (pNames < 0x20 || pNames + 4L > len) return false;
+        if (pDesc < 0x20 || pDesc + tableBytes > len) return false;
         if (pExtra != 0 && pExtra > len) return false;
 
         // Empty containers (count == 0) are valid: e.g. a 64-byte placeholder DAT.
@@ -538,7 +541,8 @@ public sealed class DatFile
         Mem.WriteU32(output, 0x0C, (uint)pTags, ByteOrder);
         Mem.WriteU32(output, 0x10, (uint)pNames, ByteOrder);
         Mem.WriteU32(output, 0x14, (uint)pDesc, ByteOrder);
-        Mem.WriteU32(output, 0x18, (uint)pExtra, ByteOrder);
+        uint writtenExtra = (lenExtra > 0 || _hasExtraPointer) ? (uint)pExtra : 0u;
+        Mem.WriteU32(output, 0x18, writtenExtra, ByteOrder);
         Mem.WriteU32(output, 0x1C, HeaderWord1C, ByteOrder);
 
         for (int i = 0; i < n; i++)

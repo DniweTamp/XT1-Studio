@@ -224,10 +224,17 @@ public sealed class BankDocument
             var datPath = HeaderSidePath!;
             if (File.Exists(datPath))
             {
-                HeaderDat = DatFile.Parse(File.ReadAllBytes(datPath));
-                wtaIndices.Clear();
-                for (int i = 0; i < HeaderDat.SubFiles.Count; i++)
-                    if (HeaderDat.SubFiles[i].Tag == "wta") wtaIndices.Add(i);
+                try
+                {
+                    HeaderDat = DatFile.Parse(File.ReadAllBytes(datPath));
+                    wtaIndices.Clear();
+                    for (int i = 0; i < HeaderDat.SubFiles.Count; i++)
+                        if (HeaderDat.SubFiles[i].Tag == "wta") wtaIndices.Add(i);
+                }
+                catch (Exception ex)
+                {
+                    _warnings.Add($"failed to read header container {Path.GetFileName(datPath)}: {ex.Message}");
+                }
             }
             else
             {
@@ -254,6 +261,47 @@ public sealed class BankDocument
             else
             {
                 _warnings.Add($"{Path.GetFileName(dttPath)} not found; payloads will be unavailable");
+            }
+        }
+        // Case C: opened container has neither wta/wtp nor inline wtb; probe the sibling (.dtt or .dat)
+        // in case the texture banks live on the other side of the pair.
+        else if (!HasWtbBanks())
+        {
+            bool openedDtt = Path.GetExtension(path).Equals(".dtt", StringComparison.OrdinalIgnoreCase);
+            var siblingPath = Path.ChangeExtension(path, openedDtt ? ".dat" : ".dtt");
+            if (!string.Equals(siblingPath, path, StringComparison.OrdinalIgnoreCase) && File.Exists(siblingPath))
+            {
+                try
+                {
+                    var siblingDat = DatFile.Parse(File.ReadAllBytes(siblingPath));
+                    if (openedDtt)
+                    {
+                        PayloadDat = HeaderDat;
+                        HeaderDat = siblingDat;
+                        HeaderSidePath = siblingPath;
+                        PayloadSidePath = path;
+                    }
+                    else
+                    {
+                        PayloadDat = siblingDat;
+                        PayloadSidePath = siblingPath;
+                    }
+
+                    if (HeaderDat is not null)
+                    {
+                        for (int i = 0; i < HeaderDat.SubFiles.Count; i++)
+                            if (HeaderDat.SubFiles[i].Tag == "wta") wtaIndices.Add(i);
+                    }
+                    if (PayloadDat is not null)
+                    {
+                        for (int i = 0; i < PayloadDat.SubFiles.Count; i++)
+                            if (PayloadDat.SubFiles[i].Tag == "wtp") wtpIndices.Add(i);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _warnings.Add($"failed to read sibling container {Path.GetFileName(siblingPath)}: {ex.Message}");
+                }
             }
         }
 

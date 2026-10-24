@@ -12,10 +12,13 @@ public static class StandaloneWtbWriter
 
     public static byte[] Build(WtbBank bank, WriteOptions? options = null)
     {
+        options ??= new WriteOptions();
         bank.IsStandalone = true;
         bank.PayloadBase = PayloadBase;
-        bank.SyncTable1WithImageSize = false;
-        bank.RecalculatePayloadOffsets(PayloadBase);
+        if (options.RecomputePayloadOffsets || bank.StructureDirty || bank.Textures.Any(t => t.OffsetsDirty))
+        {
+            bank.RecalculatePayloadOffsets(PayloadBase);
+        }
         bank.StructureDirty = true;
         return bank.ToBytes();
     }

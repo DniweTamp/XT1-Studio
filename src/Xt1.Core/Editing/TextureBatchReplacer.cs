@@ -218,7 +218,7 @@ public sealed class TextureBatchReplacer
 
                 // Replace2D/ReplaceWithXt1 stash their undo command in a thread-static slot; harvest it
                 // here, on the same thread, so the batch can combine them.
-                var command = TextureOperations.TakePendingCommand();
+                var command = TextureOperations.TakePendingCommand() ?? result.Command;
                 if (command is not null) commands.Add(command);
                 replaced++;
 

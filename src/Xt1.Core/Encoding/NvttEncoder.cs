@@ -25,8 +25,13 @@ public sealed class NvttEncoder : ITextureEncoder, IDisposable
 
         try
         {
-            var bytes = _native.EncodeSurface(image, nvttFormat.Value, MapQuality(quality), srgb,
-                hasAlpha: image.HasTransparency());
+            bool hasAlpha = image.HasTransparency();
+            var targetFormat = nvttFormat.Value == NvttFormat.Bc1 && hasAlpha
+                ? NvttFormat.Bc1a
+                : nvttFormat.Value;
+
+            var bytes = _native.EncodeSurface(image, targetFormat, MapQuality(quality), srgb,
+                hasAlpha: hasAlpha);
             return EncodeResult.Ok(bytes);
         }
         catch (Exception ex)

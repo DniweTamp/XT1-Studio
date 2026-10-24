@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Media;
@@ -13,7 +14,7 @@ namespace Xt1.App.Wpf.Theming;
 /// </summary>
 public static class ThemeManager
 {
-    private static readonly HashSet<Window> TitleBarHooked = new();
+    private static readonly ConditionalWeakTable<Window, object> TitleBarHooked = new();
 
     public static bool IsDark { get; private set; }
 
@@ -104,7 +105,7 @@ public static class ThemeManager
         }
 
         if (window.IsLoaded) Apply();
-        if (TitleBarHooked.Add(window))
+        if (TitleBarHooked.TryAdd(window, new object()))
             window.SourceInitialized += (_, _) => Apply();
     }
 

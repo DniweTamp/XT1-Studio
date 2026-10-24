@@ -76,7 +76,7 @@ public sealed class CliEncoder : ITextureEncoder
         var formatName = NvttFormatMap.ToCliFormatName(format.Format);
         if (formatName is null)
             return EncodeResult.Fail($"format {format.Name} is not supported by the nvtt_export CLI");
-        if (!NvttFormatMap.TryGetCliFormatId(format.Format, out int formatId))
+        if (!NvttFormatMap.TryGetCliFormatId(format.Format, image.HasTransparency(), out int formatId))
             return EncodeResult.Fail($"no CLI format id known for '{formatName}'");
 
         ProbeHelp();

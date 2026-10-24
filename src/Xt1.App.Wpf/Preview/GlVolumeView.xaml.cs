@@ -38,6 +38,9 @@ public sealed partial class GlVolumeView : UserControl
     [DllImport("gdi32.dll")]
     private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int width, int height);
 
+    [DllImport("gdi32.dll")]
+    private static extern bool DeleteObject(IntPtr hObject);
+
     [DllImport("user32.dll")]
     private static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool redraw);
 
@@ -256,13 +259,10 @@ public sealed partial class GlVolumeView : UserControl
     {
         try
         {
-            Xt1.Rendering.WinForms.Theming.ThemeManager.Initialize(App.Settings.Theme);
-            _control?.ApplyTheme(Xt1.Rendering.WinForms.Theming.ThemeManager.Palette);
-
             if (_control is not null && Application.Current?.TryFindResource("Brush.Viewer") is SolidColorBrush brush)
             {
                 var color = brush.Color;
-                _control.BackColor = System.Drawing.Color.FromArgb(color.A, color.R, color.G, color.B);
+                _control.ApplyViewerColor(System.Drawing.Color.FromArgb(color.A, color.R, color.G, color.B));
             }
         }
         catch (Exception ex)
@@ -270,6 +270,8 @@ public sealed partial class GlVolumeView : UserControl
             _error ??= ex.Message;
         }
     }
+
+    public void DisposeControl() => _control?.Dispose();
 
     private void Clear()
     {
@@ -373,15 +375,7 @@ public sealed partial class GlVolumeView : UserControl
         // after this message returns; defer the notification to the dispatcher.
         Dispatcher.BeginInvoke(new Action(() =>
         {
-            try
-            {
-                _control?.ApplyTheme(Xt1.Rendering.WinForms.Theming.ThemeManager.Palette);
-            }
-            catch
-            {
-                // Theming is cosmetic; a failure must not take the viewport down.
-            }
-
+            ApplyTheme();
             ApplyRoundedRegion();
             ReadyChanged?.Invoke();
         }), DispatcherPriority.Background);
@@ -404,7 +398,8 @@ public sealed partial class GlVolumeView : UserControl
 
             int diameter = (int)Math.Round(CornerRadius * 2 * VisualTreeHelper.GetDpi(this).DpiScaleX);
             IntPtr region = CreateRoundRectRgn(0, 0, width + 1, height + 1, diameter, diameter);
-            if (region != IntPtr.Zero) SetWindowRgn(_control.Handle, region, true);
+            if (region != IntPtr.Zero && SetWindowRgn(_control.Handle, region, true) == 0)
+                DeleteObject(region);
         }
         catch
         {

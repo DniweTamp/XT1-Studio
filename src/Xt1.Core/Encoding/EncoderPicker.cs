@@ -6,7 +6,7 @@ namespace Xt1.Core.Encoding;
 /// Owns the available encoders and resolves the one to use for a target format. NVTT is preferred;
 /// when it cannot handle a format (or is not installed) the managed encoder is the fallback.
 /// </summary>
-public sealed class EncoderPicker
+public sealed class EncoderPicker : IDisposable
 {
     private readonly ManagedEncoder _managed = new();
     private readonly NvttEncoder? _nvtt;
@@ -59,4 +59,6 @@ public sealed class EncoderPicker
         warn?.Invoke($"no encoder can handle {format.Name}; the managed encoder will report the failure");
         return _managed;
     }
+
+    public void Dispose() => _nvtt?.Dispose();
 }

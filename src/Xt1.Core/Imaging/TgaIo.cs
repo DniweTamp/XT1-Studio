@@ -1,4 +1,4 @@
-﻿namespace Xt1.Core.Imaging;
+namespace Xt1.Core.Imaging;
 
 /// <summary>Minimal TGA reader/writer (truecolor 24/32-bit, uncompressed and RLE).</summary>
 public static class TgaIo
@@ -40,6 +40,8 @@ public static class TgaIo
 
         var image = new RgbaImage(width, height);
         int offset = 18 + idLength;
+        if (offset > data.Length)
+            throw new InvalidDataException("TGA image ID exceeds file length");
         var pixels = new byte[pixelBytes];
         int written = 0;
 
@@ -68,6 +70,7 @@ public static class TgaIo
                 {
                     int run = count * bytesPerPixel;
                     int copy = Math.Min(run, Math.Min(pixels.Length - written, data.Length - offset));
+                    if (copy <= 0) break;
                     Array.Copy(data, offset, pixels, written, copy);
                     written += copy;
                     offset += count * bytesPerPixel;
@@ -89,10 +92,15 @@ public static class TgaIo
                 }
                 else
                 {
-                    image.SetPixel(x, y, pixels[src + 2], pixels[src + 1], pixels[src], bpp == 32 ? pixels[src + 3] : (byte)255);
+                    byte b = pixels[src];
+                    byte g = pixels[src + 1];
+                    byte r = pixels[src + 2];
+                    byte a = bytesPerPixel == 4 ? pixels[src + 3] : (byte)255;
+                    image.SetPixel(x, y, r, g, b, a);
                 }
             }
         }
+
         return image;
     }
 
@@ -101,22 +109,24 @@ public static class TgaIo
         var output = new byte[18 + image.Width * image.Height * 4];
         output[2] = 2; // uncompressed truecolor
         output[12] = (byte)(image.Width & 0xFF);
-        output[13] = (byte)(image.Width >> 8);
+        output[13] = (byte)((image.Width >> 8) & 0xFF);
         output[14] = (byte)(image.Height & 0xFF);
-        output[15] = (byte)(image.Height >> 8);
+        output[15] = (byte)((image.Height >> 8) & 0xFF);
         output[16] = 32;
-        output[17] = 0x28; // 8 alpha bits | top-left origin
+        output[17] = 0x20 | 8; // top-left, 8 alpha bits
 
-        int at = 18;
+        int dst = 18;
         for (int y = 0; y < image.Height; y++)
+        {
             for (int x = 0; x < image.Width; x++)
             {
                 var (r, g, b, a) = image.GetPixel(x, y);
-                output[at++] = b;
-                output[at++] = g;
-                output[at++] = r;
-                output[at++] = a;
+                output[dst++] = b;
+                output[dst++] = g;
+                output[dst++] = r;
+                output[dst++] = a;
             }
+        }
         return output;
     }
 }

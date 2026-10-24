@@ -38,7 +38,8 @@ internal static class TreeDump
         string? Error, List<string>? UnsupportedFormats = null,
         int LayoutMismatches = 0, int PitchRecovered = 0, int WidePitch = 0,
         List<string>? MismatchExamples = null,
-        long MagentaPixels = 0, List<string>? MagentaExamples = null);
+        long MagentaPixels = 0, List<string>? MagentaExamples = null,
+        bool Skipped = false);
 
     private static Inspection Inspect(string path, Action<string>? log, bool printTree)
     {
@@ -141,32 +142,15 @@ internal static class TreeDump
         }
         catch (Exception ex)
         {
+            if (!printTree && ex is InvalidDataException &&
+                ex.Message.Contains("DAT contains no texture bank", StringComparison.OrdinalIgnoreCase))
+            {
+                log?.Invoke($"  - {name}: {ex.Message}");
+                return new Inspection(path, default, 0, 0, 0, 0, 0, null, Skipped: true);
+            }
             log?.Invoke($"  x {name}: {ex.Message}");
             // A load failure is a file-level failure; it is not a texture that failed to decode.
             return new Inspection(path, default, 0, 0, 0, 0, 0, ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// A `.dat` that holds no `"wta"`/`"wtp"` sub-file is not a texture bank (the effect folder is
-    /// full of `epb` containers). Report it as skipped rather than failed.
-    /// </summary>
-    private static bool IsNonTextureContainer(string path, out string tags)
-    {
-        tags = string.Empty;
-        if (!Path.GetExtension(path).Equals(".dat", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        try
-        {
-            var dat = DatFile.Parse(File.ReadAllBytes(path));
-            if (dat.FindByTag("wta") is not null || dat.FindByTag("wtp") is not null) return false;
-            tags = string.Join(", ", dat.SubFiles.Select(s => s.Tag).Distinct());
-            return true;
-        }
-        catch
-        {
-            return false;
         }
     }
 
@@ -190,14 +174,12 @@ internal static class TreeDump
 
         foreach (var file in files)
         {
-            if (IsNonTextureContainer(file, out var tags))
+            var result = Inspect(file, log, printTree: false);
+            if (result.Skipped)
             {
                 skipped++;
-                log($"  - {Path.GetFileName(file)}: not a texture bank (tags: {tags})");
                 continue;
             }
-
-            var result = Inspect(file, log, printTree: false);
             textures += result.Textures;
             decoded += result.Decoded;
             failedTextures += result.Failed;

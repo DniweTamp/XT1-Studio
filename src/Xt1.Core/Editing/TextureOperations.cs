@@ -8,10 +8,11 @@ using Xt1.Core.Xt1;
 namespace Xt1.Core.Editing;
 
 /// <summary>Result of a high-level texture operation.</summary>
-public sealed record OperationResult(bool Success, string? Error, string? Warning = null)
+public sealed record OperationResult(bool Success, string? Error, string? Warning = null, IEditCommand? Command = null)
 {
-    public static OperationResult Ok(string? warning = null) => new(true, null, warning);
-    public static OperationResult Fail(string error) => new(false, error);
+    public static OperationResult Ok(string? warning = null, IEditCommand? command = null) =>
+        new(true, null, warning, command);
+    public static OperationResult Fail(string error) => new(false, error, null, null);
 }
 
 /// <summary>
@@ -75,7 +76,7 @@ public static class TextureOperations
         var afterH = texture.Header.Height;
         var afterTable2 = (byte[])texture.Table2Bytes.Clone();
 
-        _pendingCommand = new DelegateCommand("Replace texture",
+        var command = new DelegateCommand("Replace texture",
             () =>
             {
                 texture.Payload = afterPayload;
@@ -99,8 +100,9 @@ public static class TextureOperations
                 texture.Header.Width = beforeW;
                 texture.Header.Height = beforeH;
             });
+        _pendingCommand = command;
 
-        return OperationResult.Ok();
+        return OperationResult.Ok(command: command);
     }
 
     /// <summary>The solid fill a "dummy out" replacement uses.</summary>
@@ -192,6 +194,7 @@ public static class TextureOperations
         var beforePayload = texture.Payload;
         var beforeHeader = texture.Header.Raw.ToArray();
         var beforeSize = texture.PayloadSize;
+        var beforeOffset = texture.PayloadOffset;
         var beforeImageSize = texture.Header.ImageSize;
         var beforeMips = texture.Header.MipCount;
         var beforeW = texture.Header.Width;
@@ -219,7 +222,7 @@ public static class TextureOperations
         var afterDepth = texture.Header.Depth;
         var afterTable2 = (byte[])texture.Table2Bytes.Clone();
 
-        _pendingCommand = new DelegateCommand("Replace from DDS",
+        var command = new DelegateCommand("Replace from DDS",
             () =>
             {
                 texture.Payload = afterPayload;
@@ -238,14 +241,16 @@ public static class TextureOperations
                 beforeHeader.CopyTo(texture.Header.Raw, 0);
                 beforeTable2.CopyTo(texture.Table2Bytes, 0);
                 texture.PayloadSize = beforeSize;
+                texture.PayloadOffset = beforeOffset;
                 texture.Header.ImageSize = beforeImageSize;
                 texture.Header.MipCount = beforeMips;
                 texture.Header.Width = beforeW;
                 texture.Header.Height = beforeH;
                 texture.Header.Depth = beforeDepth;
             });
+        _pendingCommand = command;
 
-        return OperationResult.Ok();
+        return OperationResult.Ok(command: command);
     }
 
     /// <summary>Build a brand-new editable texture from an already-compressed DDS (lossless).</summary>
@@ -313,7 +318,9 @@ public static class TextureOperations
         var beforePayload = texture.Payload;
         var beforeHeader = originalHeader ?? texture.Header.Raw.ToArray();
         var beforeSize = texture.PayloadSize;
+        var beforeOffset = texture.PayloadOffset;
         var beforeImageSize = texture.Header.ImageSize;
+        var beforeTable2 = (byte[])texture.Table2Bytes.Clone();
 
         var result = TextureEncoder.EncodeCube(texture, faces, encoder, generateMips, quality);
         if (!result.Success)
@@ -323,12 +330,14 @@ public static class TextureOperations
         var afterHeader = texture.Header.Raw.ToArray();
         var afterSize = texture.PayloadSize;
         var afterImageSize = texture.Header.ImageSize;
+        var afterTable2 = (byte[])texture.Table2Bytes.Clone();
 
-        _pendingCommand = new DelegateCommand("Replace cubemap",
+        var command = new DelegateCommand("Replace cubemap",
             () =>
             {
                 texture.Payload = afterPayload;
                 afterHeader.CopyTo(texture.Header.Raw, 0);
+                afterTable2.CopyTo(texture.Table2Bytes, 0);
                 texture.PayloadSize = afterSize;
                 texture.Header.ImageSize = afterImageSize;
             },
@@ -336,11 +345,14 @@ public static class TextureOperations
             {
                 texture.Payload = beforePayload;
                 beforeHeader.CopyTo(texture.Header.Raw, 0);
+                beforeTable2.CopyTo(texture.Table2Bytes, 0);
                 texture.PayloadSize = beforeSize;
+                texture.PayloadOffset = beforeOffset;
                 texture.Header.ImageSize = beforeImageSize;
             });
+        _pendingCommand = command;
 
-        return OperationResult.Ok();
+        return OperationResult.Ok(command: command);
     }
 
     [ThreadStatic] private static IEditCommand? _pendingCommand;
@@ -459,6 +471,7 @@ public static class TextureOperations
         var beforeHeader = texture.Header.Raw.ToArray();
         var beforePayload = texture.Payload;
         var beforeSize = texture.PayloadSize;
+        var beforeOffset = texture.PayloadOffset;
         var afterHeader = raw.Header.Raw.ToArray();
         var afterPayload = (byte[])raw.Payload.Clone();
         var afterSize = (uint)Math.Min(afterPayload.Length, uint.MaxValue);
@@ -467,7 +480,7 @@ public static class TextureOperations
         texture.Payload = afterPayload;
         texture.PayloadSize = afterSize;
 
-        _pendingCommand = new DelegateCommand("Replace from XT1",
+        var command = new DelegateCommand("Replace from XT1",
             () =>
             {
                 afterHeader.CopyTo(texture.Header.Raw, 0);
@@ -479,9 +492,11 @@ public static class TextureOperations
                 beforeHeader.CopyTo(texture.Header.Raw, 0);
                 texture.Payload = beforePayload;
                 texture.PayloadSize = beforeSize;
+                texture.PayloadOffset = beforeOffset;
             });
+        _pendingCommand = command;
 
-        return OperationResult.Ok();
+        return OperationResult.Ok(command: command);
     }
 
     /// <summary>Replace the raw payload bytes directly (size mismatch is allowed but warned).</summary>
@@ -498,12 +513,13 @@ public static class TextureOperations
 
         var before = texture.Payload;
         var beforeSize = texture.PayloadSize;
+        var beforeOffset = texture.PayloadOffset;
         var after = (byte[])payload.Clone();
 
         texture.Payload = after;
         texture.PayloadSize = (uint)Math.Min(after.Length, uint.MaxValue);
 
-        _pendingCommand = new DelegateCommand("Replace raw payload",
+        var command = new DelegateCommand("Replace raw payload",
             () =>
             {
                 texture.Payload = after;
@@ -513,9 +529,11 @@ public static class TextureOperations
             {
                 texture.Payload = before;
                 texture.PayloadSize = beforeSize;
+                texture.PayloadOffset = beforeOffset;
             });
+        _pendingCommand = command;
 
-        return OperationResult.Ok(warning);
+        return OperationResult.Ok(warning, command);
     }
 
     /// <summary>Advisory validation across a whole bank.</summary>

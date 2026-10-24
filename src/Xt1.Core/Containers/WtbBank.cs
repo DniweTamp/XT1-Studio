@@ -251,18 +251,20 @@ public sealed class WtbBank
 
     /// <summary>Recompute <c>table0</c> payload offsets as align4096 cumulative sizes.</summary>
     /// <param name="baseOffset">Stream base (0 split, 0x1000 standalone).</param>
-    public void RecalculatePayloadOffsets(uint baseOffset)    {
+    public void RecalculatePayloadOffsets(uint baseOffset)
+    {
         long cursor = 0;
         foreach (var tex in _textures)
         {
             tex.PayloadOffset = baseOffset + (uint)cursor;
+            uint actualLength = (uint)Math.Min((long)tex.Payload.Length, uint.MaxValue);
             uint size = SyncTable1WithImageSize
                 ? (uint)Math.Min(tex.Header.ImageSize, uint.MaxValue)
                 : tex.PayloadSize != 0
                     ? tex.PayloadSize
-                    : (uint)Math.Min((long)tex.Payload.Length, uint.MaxValue);
+                    : actualLength;
             tex.PayloadSize = size;
-            cursor = Mem.Align(cursor + size, 4096);
+            cursor = Mem.Align(cursor + Math.Max(size, actualLength), 4096);
         }
     }
 
@@ -278,13 +280,13 @@ public sealed class WtbBank
 
         long end = 0;
         foreach (var tex in _textures)
-            end = Math.Max(end, (long)tex.PayloadOffset + tex.Payload.Length);
+            end = Math.Max(end, Math.Max(0L, (long)tex.PayloadOffset - streamBase) + tex.Payload.Length);
 
         var stream = new byte[end];
         foreach (var tex in _textures)
         {
             if (tex.Payload.Length == 0) continue;
-            int at = (int)tex.PayloadOffset;
+            int at = (int)((long)tex.PayloadOffset - streamBase);
             if (at >= 0 && at + tex.Payload.Length <= stream.Length)
                 tex.Payload.CopyTo(stream, at);
         }

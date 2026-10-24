@@ -221,7 +221,8 @@ internal static class FileCli
 
         if (!TryResolveFormatOption(options, log, out var requestedFormat)) return 2;
 
-        var result = ImportInto(texture, positional[1], options, requestedFormat, BuildEncoders(), log,
+        using var encoders = BuildEncoders();
+        var result = ImportInto(texture, positional[1], options, requestedFormat, encoders, log,
             out var description);
         if (!result.Success)
         {
@@ -295,7 +296,8 @@ internal static class FileCli
                              ?? FormatTable.Get(settings.DefaultImportFormat)
                              ?? FormatTable.Get(Xt1Format.Bc7Unorm)!;
                 var prepared = Solidify.Process(ImageIo.Load(input), Has(options, "--solidify"), Has(options, "--opaque"));
-                var encoder = BuildEncoders().Pick(ParseBackend(CliOptions.Get(options, "--backend"), settings), format,
+                using var encoders = BuildEncoders();
+                var encoder = encoders.Pick(ParseBackend(CliOptions.Get(options, "--backend"), settings), format,
                     warning => log("  ! " + warning));
                 texture = EditableTexture.CreateNew(format.Format, (uint)prepared.Width, (uint)prepared.Height);
                 var result = TextureOperations.Replace2D(texture, prepared, encoder, !Has(options, "--no-mips"),
@@ -422,7 +424,8 @@ internal static class FileCli
             return 1;
         }
 
-        var encoder = BuildEncoders().Pick(EncoderBackend.Nvtt, format);
+        using var encoders = BuildEncoders();
+        var encoder = encoders.Pick(EncoderBackend.Nvtt, format);
         var result = TextureOperations.DummyOut(texture, fill, encoder,
             ParseQuality(CliOptions.Get(options, "--quality")), !Has(options, "--no-sync-flags"));
         if (!result.Success)
@@ -494,7 +497,8 @@ internal static class FileCli
             ParseQuality(CliOptions.Get(options, "--alpha-quality") ?? CliOptions.Get(options, "--quality")),
             !Has(options, "--no-sync-flags"));
 
-        var recompressor = new BatchRecompressor(BuildEncoders());
+        using var encoders = BuildEncoders();
+        var recompressor = new BatchRecompressor(encoders);
         var progress = new InlineProgress(log);
         int converted = 0, skipped = 0;
 

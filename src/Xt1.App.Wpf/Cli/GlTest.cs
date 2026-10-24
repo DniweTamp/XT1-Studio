@@ -157,111 +157,124 @@ internal static class GlTest
         control.ShowSlices = false;
         control.ShowBounds = false;
         var perMode = new Dictionary<VolumeRenderMode, Bitmap>();
-        foreach (var candidate in new[] { VolumeRenderMode.Rgb, VolumeRenderMode.Alpha, VolumeRenderMode.Mip })
+        try
         {
-            control.RenderMode = candidate;
-            var bitmap = Render(control, size);
-            if (bitmap is null)
+            foreach (var candidate in new[] { VolumeRenderMode.Rgb, VolumeRenderMode.Alpha, VolumeRenderMode.Mip })
             {
-                log("  x offscreen render failed");
-                return false;
-            }
-            Save(bitmap, Path.Combine(outputDirectory, $"{stem}_{candidate.ToString().ToLowerInvariant()}.png"));
-            perMode[candidate] = bitmap;
-            var stats = Analyze(bitmap);
-            log($"  [{(stats.Drawn > minimum ? "ok" : "--")}] {candidate} assembled: {stats.Drawn} px " +
-                $"({stats.Drawn / (double)(size * size):P2}), mean luminance {stats.MeanLuminance:F1}");
-        }
-        control.RenderMode = mode;
-
-        var volumeOnly = perMode[mode];
-        var drawn = Analyze(volumeOnly);
-        var best = perMode.OrderByDescending(pair => Analyze(pair.Value).Drawn).First();
-        ok &= Check(log, "assembled volume draws pixels in some opacity source",
-            Analyze(best.Value).Drawn > minimum,
-            $"{best.Key} draws the most ({Analyze(best.Value).Drawn} px)");
-        ok &= Check(log, $"object is inside the frame and centered ({mode})", drawn.Centered, drawn.Bounds);
-
-        // 2. Orbiting must change the image (the camera moves around the object, not inside it).
-        float baseYaw = control.Camera.Yaw;
-        control.Camera.Yaw = baseYaw + 0.8f;
-        var orbited = Render(control, size);
-        control.Camera.Yaw = baseYaw;
-        if (orbited is not null)
-        {
-            Save(orbited, Path.Combine(outputDirectory, stem + "_orbited.png"));
-            double difference = MeanAbsDiff(volumeOnly, orbited);
-            ok &= Check(log, "orbiting changes the image", difference > 2.0, $"mean |diff| {difference:F2}");
-        }
-
-        // 3. Channel isolation must reach the shader. A gray volume (R~G~B) cannot show a difference,
-        // so that case is reported as not applicable rather than failed.
-        if (channel == ImageChannelMode.Rgba)
-        {
-            if (gray)
-            {
-                log("  [--] channel isolation: n/a (R~G~B)");
-            }
-            else
-            {
-                control.Channel = ImageChannelMode.Red;
-                var red = Render(control, size);
-                control.Channel = ImageChannelMode.Rgba;
-                if (red is not null)
+                control.RenderMode = candidate;
+                var bitmap = Render(control, size);
+                if (bitmap is null)
                 {
-                    Save(red, Path.Combine(outputDirectory, stem + "_red.png"));
-                    double difference = MeanAbsDiff(volumeOnly, red);
-                    ok &= Check(log, "channel isolation changes the 3D image", difference > 0.5,
+                    log("  x offscreen render failed");
+                    return false;
+                }
+                Save(bitmap, Path.Combine(outputDirectory, $"{stem}_{candidate.ToString().ToLowerInvariant()}.png"));
+                perMode[candidate] = bitmap;
+                var stats = Analyze(bitmap);
+                log($"  [{(stats.Drawn > minimum ? "ok" : "--")}] {candidate} assembled: {stats.Drawn} px " +
+                    $"({stats.Drawn / (double)(size * size):P2}), mean luminance {stats.MeanLuminance:F1}");
+            }
+            control.RenderMode = mode;
+
+            var volumeOnly = perMode[mode];
+            var drawn = Analyze(volumeOnly);
+            var best = perMode.OrderByDescending(pair => Analyze(pair.Value).Drawn).First();
+            ok &= Check(log, "assembled volume draws pixels in some opacity source",
+                Analyze(best.Value).Drawn > minimum,
+                $"{best.Key} draws the most ({Analyze(best.Value).Drawn} px)");
+            ok &= Check(log, $"object is inside the frame and centered ({mode})", drawn.Centered, drawn.Bounds);
+
+            // 2. Orbiting must change the image (the camera moves around the object, not inside it).
+            float baseYaw = control.Camera.Yaw;
+            control.Camera.Yaw = baseYaw + 0.8f;
+            using (var orbited = Render(control, size))
+            {
+                control.Camera.Yaw = baseYaw;
+                if (orbited is not null)
+                {
+                    Save(orbited, Path.Combine(outputDirectory, stem + "_orbited.png"));
+                    double difference = MeanAbsDiff(volumeOnly, orbited);
+                    ok &= Check(log, "orbiting changes the image", difference > 2.0, $"mean |diff| {difference:F2}");
+                }
+            }
+
+            // 3. Channel isolation must reach the shader. A gray volume (R~G~B) cannot show a difference,
+            // so that case is reported as not applicable rather than failed.
+            if (channel == ImageChannelMode.Rgba)
+            {
+                if (gray)
+                {
+                    log("  [--] channel isolation: n/a (R~G~B)");
+                }
+                else
+                {
+                    control.Channel = ImageChannelMode.Red;
+                    using var red = Render(control, size);
+                    control.Channel = ImageChannelMode.Rgba;
+                    if (red is not null)
+                    {
+                        Save(red, Path.Combine(outputDirectory, stem + "_red.png"));
+                        double difference = MeanAbsDiff(volumeOnly, red);
+                        ok &= Check(log, "channel isolation changes the 3D image", difference > 0.5,
+                            $"mean |diff| {difference:F2}");
+                    }
+                }
+            }
+
+            // 4. The opacity source must reach the shader (RGB luminance vs stored alpha vs MIP).
+            int distinctModes = perMode.Values.Select(Analyze).Select(s => s.Drawn).Distinct().Count();
+            ok &= Check(log, "the render modes do not all produce the same image", distinctModes > 1,
+                $"{distinctModes} distinct coverage(s)");
+
+            // 5. Bounds and slice planes must draw on top of the volume. The planes are constrained to the
+            // volume's box, so the region they light up must stay inside the box's projected outline:
+            // that catches a plane that is placed or oriented differently from the volume.
+            control.ShowBounds = true;
+            control.ShowSlices = false;
+            using (var boundsOnly = Render(control, size))
+            {
+                Save(boundsOnly, Path.Combine(outputDirectory, stem + "_bounds.png"));
+                if (boundsOnly is not null)
+                {
+                    var bounds = Analyze(boundsOnly);
+                    ok &= Check(log, "bounds box draws", bounds.Drawn > drawn.Drawn,
+                        $"{bounds.Drawn} px vs {drawn.Drawn} px without bounds");
+
+                    control.ShowSlices = true;
+                    using var boundsAndSlices = Render(control, size);
+                    Save(boundsAndSlices, Path.Combine(outputDirectory, stem + "_bounds_slices.png"));
+                    if (boundsAndSlices is not null)
+                    {
+                        var withPlanes = Analyze(boundsAndSlices);
+                        bool contained = Contained(withPlanes, bounds, 4);
+                        ok &= Check(log, "slice planes stay inside the volume box", contained,
+                            $"planes [{withPlanes.Bounds}] vs box [{bounds.Bounds}]");
+                    }
+                }
+            }
+
+            control.ShowBounds = false;
+            control.ShowSlices = true;
+            using (var withSlices = Render(control, size))
+            {
+                Save(withSlices, Path.Combine(outputDirectory, stem + "_slices.png"));
+                if (withSlices is not null)
+                {
+                    double difference = MeanAbsDiff(volumeOnly, withSlices);
+                    ok &= Check(log, "slice planes draw on top of the volume", difference > 0.5,
                         $"mean |diff| {difference:F2}");
                 }
             }
+
+            log(ok
+                ? $"  ok #{texture.Index} ({volume.Width}x{volume.Height}x{volume.Depth}) -> {outputDirectory}"
+                : $"  FAILED #{texture.Index}");
+            return ok;
         }
-
-        // 4. The opacity source must reach the shader (RGB luminance vs stored alpha vs MIP).
-        int distinctModes = perMode.Values.Select(Analyze).Select(s => s.Drawn).Distinct().Count();
-        ok &= Check(log, "the render modes do not all produce the same image", distinctModes > 1,
-            $"{distinctModes} distinct coverage(s)");
-
-        // 5. Bounds and slice planes must draw on top of the volume. The planes are constrained to the
-        // volume's box, so the region they light up must stay inside the box's projected outline:
-        // that catches a plane that is placed or oriented differently from the volume.
-        control.ShowBounds = true;
-        control.ShowSlices = false;
-        var boundsOnly = Render(control, size);
-        Save(boundsOnly, Path.Combine(outputDirectory, stem + "_bounds.png"));
-        if (boundsOnly is not null)
+        finally
         {
-            var bounds = Analyze(boundsOnly);
-            ok &= Check(log, "bounds box draws", bounds.Drawn > drawn.Drawn,
-                $"{bounds.Drawn} px vs {drawn.Drawn} px without bounds");
-
-            control.ShowSlices = true;
-            var boundsAndSlices = Render(control, size);
-            Save(boundsAndSlices, Path.Combine(outputDirectory, stem + "_bounds_slices.png"));
-            if (boundsAndSlices is not null)
-            {
-                var withPlanes = Analyze(boundsAndSlices);
-                bool contained = Contained(withPlanes, bounds, 4);
-                ok &= Check(log, "slice planes stay inside the volume box", contained,
-                    $"planes [{withPlanes.Bounds}] vs box [{bounds.Bounds}]");
-            }
+            foreach (var bmp in perMode.Values) bmp.Dispose();
         }
-
-        control.ShowBounds = false;
-        control.ShowSlices = true;
-        var withSlices = Render(control, size);
-        Save(withSlices, Path.Combine(outputDirectory, stem + "_slices.png"));
-        if (withSlices is not null)
-        {
-            double difference = MeanAbsDiff(volumeOnly, withSlices);
-            ok &= Check(log, "slice planes draw on top of the volume", difference > 0.5,
-                $"mean |diff| {difference:F2}");
-        }
-
-        log(ok
-            ? $"  ok #{texture.Index} ({volume.Width}x{volume.Height}x{volume.Depth}) -> {outputDirectory}"
-            : $"  FAILED #{texture.Index}");
-        return ok;
     }
 
     private static Bitmap? Render(GlPreviewControl control, int size) => control.RenderToBitmap(size, size);
@@ -319,7 +332,7 @@ internal static class GlTest
         string stem = $"#{texture.Index}_{texture.EffectiveHash():X8}_m{mip}_cube";
 
         bool ok = true;
-        var first = Render(control, size);
+        using var first = Render(control, size);
         if (first is null)
         {
             log("  x offscreen render failed");
@@ -332,48 +345,52 @@ internal static class GlTest
 
         float baseYaw = control.Camera.Yaw;
         control.Camera.Yaw = baseYaw + 0.8f;
-        var turned = Render(control, size);
-        control.Camera.Yaw = baseYaw;
-        if (turned is not null)
+        using (var turned = Render(control, size))
         {
-            Save(turned, Path.Combine(outputDirectory, stem + "_turned.png"));
-            double difference = MeanAbsDiff(first, turned);
-            if (difference > ViewChangeThreshold)
+            control.Camera.Yaw = baseYaw;
+            if (turned is not null)
             {
-                ok &= Check(log, "turning the skybox changes the image", true, $"mean |diff| {difference:F2}");
-            }
-            else if (drawn.LuminanceSpread <= FlatSpread)
-            {
-                // The skybox is a single flat color (possibly black), so no rotation can change a
-                // single pixel. Judged from the render, because a near-black face is functionally flat
-                // however much its low byte values wiggle.
-                log($"  [--] turning: n/a (flat skybox, luminance spread {drawn.LuminanceSpread})");
-            }
-            else
-            {
-                ok &= Check(log, "turning the skybox changes the image", false, $"mean |diff| {difference:F2}");
+                Save(turned, Path.Combine(outputDirectory, stem + "_turned.png"));
+                double difference = MeanAbsDiff(first, turned);
+                if (difference > ViewChangeThreshold)
+                {
+                    ok &= Check(log, "turning the skybox changes the image", true, $"mean |diff| {difference:F2}");
+                }
+                else if (drawn.LuminanceSpread <= FlatSpread)
+                {
+                    // The skybox is a single flat color (possibly black), so no rotation can change a
+                    // single pixel. Judged from the render, because a near-black face is functionally flat
+                    // however much its low byte values wiggle.
+                    log($"  [--] turning: n/a (flat skybox, luminance spread {drawn.LuminanceSpread})");
+                }
+                else
+                {
+                    ok &= Check(log, "turning the skybox changes the image", false, $"mean |diff| {difference:F2}");
+                }
             }
         }
 
         float baseFov = control.Camera.Fov;
         control.Camera.ZoomFov(3f);
-        var zoomed = Render(control, size);
-        control.Camera.Fov = baseFov;
-        if (zoomed is not null)
+        using (var zoomed = Render(control, size))
         {
-            Save(zoomed, Path.Combine(outputDirectory, stem + "_zoomed.png"));
-            double difference = MeanAbsDiff(first, zoomed);
-            if (difference > ViewChangeThreshold)
+            control.Camera.Fov = baseFov;
+            if (zoomed is not null)
             {
-                ok &= Check(log, "wheel zoom changes the skybox", true, $"mean |diff| {difference:F2}");
-            }
-            else if (drawn.LuminanceSpread <= FlatSpread)
-            {
-                log($"  [--] wheel zoom: n/a (flat skybox, luminance spread {drawn.LuminanceSpread})");
-            }
-            else
-            {
-                ok &= Check(log, "wheel zoom changes the skybox", false, $"mean |diff| {difference:F2}");
+                Save(zoomed, Path.Combine(outputDirectory, stem + "_zoomed.png"));
+                double difference = MeanAbsDiff(first, zoomed);
+                if (difference > ViewChangeThreshold)
+                {
+                    ok &= Check(log, "wheel zoom changes the skybox", true, $"mean |diff| {difference:F2}");
+                }
+                else if (drawn.LuminanceSpread <= FlatSpread)
+                {
+                    log($"  [--] wheel zoom: n/a (flat skybox, luminance spread {drawn.LuminanceSpread})");
+                }
+                else
+                {
+                    ok &= Check(log, "wheel zoom changes the skybox", false, $"mean |diff| {difference:F2}");
+                }
             }
         }
 
@@ -383,7 +400,7 @@ internal static class GlTest
         if (channel == ImageChannelMode.Rgba)
         {
             control.Channel = ImageChannelMode.Red;
-            var red = Render(control, size);
+            using var red = Render(control, size);
             control.Channel = ImageChannelMode.Rgba;
             if (red is not null)
             {
@@ -412,25 +429,29 @@ internal static class GlTest
         if (drawn.HasIntermediate)
         {
             control.Gamma = 2.2f;
-            var gamma = Render(control, size);
-            control.Gamma = 1f;
-            if (gamma is not null)
+            using (var gamma = Render(control, size))
             {
-                Save(gamma, Path.Combine(outputDirectory, stem + "_gamma.png"));
-                double difference = MeanAbsDiff(first, gamma);
-                ok &= Check(log, "gamma changes the cubemap image", difference > ViewChangeThreshold,
-                    $"mean |diff| {difference:F2}");
+                control.Gamma = 1f;
+                if (gamma is not null)
+                {
+                    Save(gamma, Path.Combine(outputDirectory, stem + "_gamma.png"));
+                    double difference = MeanAbsDiff(first, gamma);
+                    ok &= Check(log, "gamma changes the cubemap image", difference > ViewChangeThreshold,
+                        $"mean |diff| {difference:F2}");
+                }
             }
 
             control.Exposure = 2f;
-            var exposed = Render(control, size);
-            control.Exposure = 1f;
-            if (exposed is not null)
+            using (var exposed = Render(control, size))
             {
-                Save(exposed, Path.Combine(outputDirectory, stem + "_exposure.png"));
-                double difference = MeanAbsDiff(first, exposed);
-                ok &= Check(log, "exposure changes the cubemap image", difference > ViewChangeThreshold,
-                    $"mean |diff| {difference:F2}");
+                control.Exposure = 1f;
+                if (exposed is not null)
+                {
+                    Save(exposed, Path.Combine(outputDirectory, stem + "_exposure.png"));
+                    double difference = MeanAbsDiff(first, exposed);
+                    ok &= Check(log, "exposure changes the cubemap image", difference > ViewChangeThreshold,
+                        $"mean |diff| {difference:F2}");
+                }
             }
 
             // Auto exposure must reach the shader, but only when the cubemap's own factor differs from 1;
@@ -438,7 +459,7 @@ internal static class GlTest
             if (Math.Abs(control.AutoExposureScale - 1f) > 0.005f)
             {
                 control.AutoExposure = false;
-                var autoOff = Render(control, size);
+                using var autoOff = Render(control, size);
                 control.AutoExposure = true;
                 if (autoOff is not null)
                 {
@@ -465,27 +486,31 @@ internal static class GlTest
         control.Exposure = 4f;
         if (hdrFaces is { Count: 6 }) control.SetCubeFacesHdr(hdrFaces);
         else control.SetCubeFaces(faces!);
-        var reuploaded = Render(control, size);
-        control.Exposure = 1f;
-        if (reuploaded is not null)
+        using (var reuploaded = Render(control, size))
         {
-            float scaleAtFour = control.AutoExposureScale;
-            ok &= Check(log, "auto exposure ignores the user exposure",
-                Math.Abs(scaleAtOne - scaleAtFour) < 1e-6f, $"{scaleAtOne:F4} -> {scaleAtFour:F4}");
+            control.Exposure = 1f;
+            if (reuploaded is not null)
+            {
+                float scaleAtFour = control.AutoExposureScale;
+                ok &= Check(log, "auto exposure ignores the user exposure",
+                    Math.Abs(scaleAtOne - scaleAtFour) < 1e-6f, $"{scaleAtOne:F4} -> {scaleAtFour:F4}");
+            }
         }
 
         // The opaque-alpha toggle only shows on a cubemap whose stored alpha is not uniform; that is
         // reported as not applicable rather than failed for the usual all-opaque skybox.
         control.OpaqueAlpha = true;
-        var opaqueCube = Render(control, size);
-        if (opaqueCube is not null)
+        using (var opaqueCube = Render(control, size))
         {
-            Save(opaqueCube, Path.Combine(outputDirectory, stem + "_opaque.png"));
-            double difference = MeanAbsDiff(first, opaqueCube);
-            if (difference > 0.5)
-                ok &= Check(log, "opaque alpha changes the cubemap image", true, $"mean |diff| {difference:F2}");
-            else
-                log("  [--] opaque alpha: n/a (cubemap alpha is uniform)");
+            if (opaqueCube is not null)
+            {
+                Save(opaqueCube, Path.Combine(outputDirectory, stem + "_opaque.png"));
+                double difference = MeanAbsDiff(first, opaqueCube);
+                if (difference > 0.5)
+                    ok &= Check(log, "opaque alpha changes the cubemap image", true, $"mean |diff| {difference:F2}");
+                else
+                    log("  [--] opaque alpha: n/a (cubemap alpha is uniform)");
+            }
         }
 
         log(ok ? $"  ok #{texture.Index} cube -> {outputDirectory}" : $"  FAILED #{texture.Index}");

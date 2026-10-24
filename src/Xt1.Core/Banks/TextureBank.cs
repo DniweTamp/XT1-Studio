@@ -314,7 +314,7 @@ public sealed class TextureBank
             ? (uint)(t4 + Mem.Align(0xC0 * count, 0x20))
             : (t3 != 0 ? t3 : t2) + (uint)stride;
         uint mipTable = HasMipmapTable ? afterInfos : 0u;
-        uint structuralEndU = (mipTable != 0 ? mipTable : afterInfos) + (uint)stride;
+        uint structuralEndU = mipTable != 0 ? mipTable + (uint)stride : afterInfos;
         int structuralEnd = (int)structuralEndU;
 
         int align = Format switch

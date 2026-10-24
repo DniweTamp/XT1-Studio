@@ -148,6 +148,20 @@ public partial class MainWindow : Window
         FieldEditor.CommandProduced += command =>
         {
             _history.Push(command);
+            SyncRawDocument();
+            if (IsStructural(command.Name))
+            {
+                RefreshAfterEdit(_selected);
+                return;
+            }
+            if (_selected is not null)
+            {
+                if (_mipIndex >= Math.Max(1, _selected.Header.MipCount))
+                    _mipIndex = 0;
+                UpdateTextureHeaderReadout(_selected);
+                RebuildMipCombo(_selected);
+                UpdateSliceControls(_selected);
+            }
             RefreshInspector();
         };
 
@@ -194,6 +208,11 @@ public partial class MainWindow : Window
         ThemeManager.Changed -= OnThemeChanged;
         _exportCts?.Cancel();
         _exportCts?.Dispose();
+        _thumbCts?.Cancel();
+        _thumbCts?.Dispose();
+        _thumbGate.Dispose();
+        _encoders?.Dispose();
+        GlView.DisposeControl();
         _animTimer.Stop();
 
         // The raw-bytes dialog hides instead of closing, so it must be released explicitly.
@@ -504,28 +523,39 @@ public partial class MainWindow : Window
 
     private void Undo()
     {
+        string? commandName = _history.UndoName;
         if (!_history.Undo()) return;
-        RefreshAfterHistory();
+        RefreshAfterHistory(commandName);
     }
 
     private void Redo()
     {
+        string? commandName = _history.RedoName;
         if (!_history.Redo()) return;
-        RefreshAfterHistory();
+        RefreshAfterHistory(commandName);
     }
 
     /// <summary>
-    /// Commands that add or remove a texture change the tree, so an undo/redo that moved one across
-    /// the stack needs a rebuild. Everything else only changes values or pixels: the inspector is
-    /// refreshed in place, and the preview too because a replace/raw-byte undo changes the payload.
+    /// Commands that add, remove, or replace a texture change the tree/grid labels and mip counts, so
+    /// an undo/redo that moved one across the stack refreshes the tree and asset grid. Value-only edits
+    /// refresh the inspector and preview in place.
     /// </summary>
-    private void RefreshAfterHistory()
+    private void RefreshAfterHistory(string? executedCommandName = null)
     {
-        bool structural = IsStructural(_history.UndoName) || IsStructural(_history.RedoName);
-        if (structural)
+        SyncRawDocument();
+        if (IsStructural(executedCommandName))
         {
-            BuildTree();
+            RefreshAfterEdit(_selected);
             return;
+        }
+
+        if (_selected is not null)
+        {
+            if (_mipIndex >= Math.Max(1, _selected.Header.MipCount))
+                _mipIndex = 0;
+            UpdateTextureHeaderReadout(_selected);
+            RebuildMipCombo(_selected);
+            UpdateSliceControls(_selected);
         }
 
         RefreshInspector();
@@ -533,7 +563,9 @@ public partial class MainWindow : Window
     }
 
     private static bool IsStructural(string? commandName) =>
-        commandName is "Delete texture" or "Add texture";
+        commandName is "Delete texture" or "Add texture" or "texture count"
+            or "Replace texture" or "Replace cubemap" or "Replace from DDS"
+            or "Replace from XT1" or "Replace raw payload" or "Batch replace textures";
 
     private void OnMenuExportContainer(object sender, RoutedEventArgs e) =>
         ExportContainerTextures(FormatFromTag(sender));
@@ -583,6 +615,7 @@ public partial class MainWindow : Window
     /// </summary>
     private void RebuildEncoders()
     {
+        _encoders?.Dispose();
         var tools = App.Settings.Resolve();
         NvttEncoder? nvtt = null;
         if (tools.NvttDll is not null)
@@ -610,6 +643,7 @@ public partial class MainWindow : Window
 
     private void OnMenuBatchRecompress(object sender, RoutedEventArgs e)
     {
+        SyncRawDocument();
         var dialog = new BatchRecompressDialog(RunBatchRecompressAsync, _document is not null)
         {
             Owner = this,
@@ -2396,6 +2430,7 @@ public partial class MainWindow : Window
                 var encoder = _encoders.Pick(options.Backend, options.SelectedFormat);
                 var result = TextureOperations.Replace2D(texture, prepared, encoder, options.GenerateMips,
                     options.Quality);
+                TextureOperations.TakePendingCommand();
                 if (!result.Success)
                 {
                     StatusLeft.Text = "Add failed: " + result.Error;
@@ -2431,6 +2466,7 @@ public partial class MainWindow : Window
     /// <summary>Rebuild the tree after an edit and keep the selection sensible.</summary>
     private void RefreshAfterEdit(EditableTexture? select = null)
     {
+        SyncRawDocument();
         if (select is not null) _selected = select;
 
         BuildTree();
@@ -2627,16 +2663,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var header = texture.Header;
-        var info = texture.FormatInfo;
-        var type = header.Type.Describe();
-
-        TitleText.Text = $"Texture #{texture.Index}";
-        SubtitleText.Text = $"{_document?.DisplayName ?? "(untitled)"} / {section?.Label ?? "xt1 (raw payload)"} / {type}";
-        SpecText.Text = info is null
-            ? "unknown format"
-            : $"{info.Name} (0x{info.Value:X}) | {header.Width} \u00D7 {header.Height} \u00D7 {header.Depth} | {type} | " +
-              $"{header.MipCount} mip levels | {header.ImageSize / 1048576.0:0.00} MiB";
+        UpdateTextureHeaderReadout(texture, section);
 
         ValidationBanner.Visibility = Visibility.Visible;
 
@@ -2665,6 +2692,21 @@ public partial class MainWindow : Window
     /// the decoder (and, for a volume, re-decoding every slice and re-uploading it) would be wasted
     /// work on every committed field change.
     /// </summary>
+    private void UpdateTextureHeaderReadout(EditableTexture texture, BankSection? section = null)
+    {
+        section ??= SelectedAssetTarget().Section;
+        var header = texture.Header;
+        var info = texture.FormatInfo;
+        var type = header.Type.Describe();
+
+        TitleText.Text = $"Texture #{texture.Index}";
+        SubtitleText.Text = $"{_document?.DisplayName ?? "(untitled)"} / {section?.Label ?? "xt1 (raw payload)"} / {type}";
+        SpecText.Text = info is null
+            ? "unknown format"
+            : $"{info.Name} (0x{info.Value:X}) | {header.Width} \u00D7 {header.Height} \u00D7 {header.Depth} | {type} | " +
+              $"{header.MipCount} mip levels | {header.ImageSize / 1048576.0:0.00} MiB";
+    }
+
     private void RefreshInspector()
     {
         if (_selected is null) return;
@@ -2841,19 +2883,23 @@ public partial class MainWindow : Window
         }
 
         var texture = _selected;
-        texture.Name = prompt.Value.Trim();
+        string? beforeName = texture.Name;
         uint before = texture.Hash;
         var beforeMode = texture.HashMode;
+        string afterName = prompt.Value.Trim();
+        texture.Name = afterName;
         texture.ComputeHashFromName();
         uint after = texture.Hash;
         _history.Push(new DelegateCommand("Compute hash from name",
             () =>
             {
+                texture.Name = afterName;
                 texture.Hash = after;
                 texture.HashMode = HashMode.Forced;
             },
             () =>
             {
+                texture.Name = beforeName;
                 texture.Hash = before;
                 texture.HashMode = beforeMode;
             }));

@@ -85,6 +85,12 @@ public sealed class GlPreviewControl : GLControl, IThemedControl
         Invalidate();
     }
 
+    public void ApplyViewerColor(Color viewerColor)
+    {
+        BackColor = viewerColor;
+        Invalidate();
+    }
+
     /// <summary>Arrow keys drive the look control, so they must reach the control instead of navigating.</summary>
     protected override bool IsInputKey(Keys keyData)
     {
@@ -227,6 +233,10 @@ public sealed class GlPreviewControl : GLControl, IThemedControl
         {
             base.OnLoad(e);
             MakeCurrent();
+            foreach (var existing in new[] { _skyProgram, _volumeProgram, _sliceProgram, _boundsProgram })
+                if (existing >= 0) GL.DeleteProgram(existing);
+            if (_vao > 0) GL.DeleteVertexArray(_vao);
+
             _vao = GL.GenVertexArray();
             GL.BindVertexArray(_vao);
 
@@ -819,12 +829,21 @@ public sealed class GlPreviewControl : GLControl, IThemedControl
         int vertex = Compile(ShaderType.VertexShader, vertexSource, out error);
         if (vertex < 0) return -1;
         int fragment = Compile(ShaderType.FragmentShader, fragmentSource, out error);
-        if (fragment < 0) return -1;
+        if (fragment < 0)
+        {
+            GL.DeleteShader(vertex);
+            return -1;
+        }
 
         int program = GL.CreateProgram();
         GL.AttachShader(program, vertex);
         GL.AttachShader(program, fragment);
         GL.LinkProgram(program);
+        GL.DetachShader(program, vertex);
+        GL.DetachShader(program, fragment);
+        GL.DeleteShader(vertex);
+        GL.DeleteShader(fragment);
+
         GL.GetProgram(program, GetProgramParameterName.LinkStatus, out int status);
         if (status == 0)
         {
@@ -832,8 +851,6 @@ public sealed class GlPreviewControl : GLControl, IThemedControl
             GL.DeleteProgram(program);
             return -1;
         }
-        GL.DeleteShader(vertex);
-        GL.DeleteShader(fragment);
         return program;
     }
 

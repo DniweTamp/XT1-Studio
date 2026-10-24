@@ -88,7 +88,7 @@ public static class DdsIo
 
     public static DdsImage Read(byte[] data)
     {
-        if (!IsDds(data)) throw new InvalidDataException("not a DDS file");
+        if (!IsDds(data) || data.Length < 0x80) throw new InvalidDataException("not a DDS file");
         int height = (int)Mem.ReadU32LE(data, 0x0C);
         int width = (int)Mem.ReadU32LE(data, 0x10);
         int depth = (int)Mem.ReadU32LE(data, 0x18);
@@ -109,6 +109,7 @@ public static class DdsIo
         int dataOffset;
         if (hasDx10)
         {
+            if (data.Length < 0x94) throw new InvalidDataException("truncated DDS DX10 header");
             dxgi = Mem.ReadU32LE(data, 0x80);
             int resourceDimension = (int)Mem.ReadU32LE(data, 0x84);
             uint miscFlag = Mem.ReadU32LE(data, 0x88);

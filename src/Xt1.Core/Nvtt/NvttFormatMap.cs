@@ -89,10 +89,21 @@ public static class NvttFormatMap
         Support.TryGetValue(format, out var support) ? support.CliName : null;
 
     /// <summary>The nvtt_export <c>-f</c> id for a format, if the CLI supports it.</summary>
-    public static bool TryGetCliFormatId(Xt1Format format, out int id)
+    public static bool TryGetCliFormatId(Xt1Format format, out int id) =>
+        TryGetCliFormatId(format, hasAlpha: false, out id);
+
+    /// <summary>The nvtt_export <c>-f</c> id for a format, promoting <c>bc1</c> to <c>bc1a</c> when <paramref name="hasAlpha"/> is true.</summary>
+    public static bool TryGetCliFormatId(Xt1Format format, bool hasAlpha, out int id)
     {
         if (Support.TryGetValue(format, out var support) && support.CliName is not null)
         {
+            if (hasAlpha && string.Equals(support.CliName, "bc1", StringComparison.OrdinalIgnoreCase)
+                && CliFormatIds.TryGetValue("bc1a", out int bc1aId))
+            {
+                id = bc1aId;
+                return true;
+            }
+
             id = support.CliFormatId;
             return true;
         }
